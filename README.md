@@ -28,7 +28,7 @@
 ## 🛠️ 硬體架構 (Hardware)
 
 *   **MCU**: ESP32 NodeMCU-32S
-*   **CAN Transceiver**: SN65HVD230 或 VP230 (3.3V Logic)
+*   **CAN Transceiver**: TJA1051T/3 或 SN65HVD230 或 VP230 (3.3V Logic)
 *   **Display**: 0.96" OLED (SSD1306/SH1106 I2C)
 *   **Power Supply**: LM Power Module (LM48-6000AL tested)
 
