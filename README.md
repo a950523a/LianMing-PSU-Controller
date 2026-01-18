@@ -30,7 +30,7 @@
 *   **MCU**: ESP32 NodeMCU-32S
 *   **CAN Transceiver**: TJA1051T/3 或 SN65HVD230 或 VP230 (3.3V Logic)
 *   **Display**: 0.96" OLED (SSD1306/SH1106 I2C)
-*   **Power Supply**: LM Power Module (LM48-6000AL tested)
+*   **Power Supply**: LM Power Module (LM100-6000AL tested)
 
 ### 接線定義 (Pinout)
 
