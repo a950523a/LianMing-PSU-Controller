@@ -3,7 +3,7 @@
 **An open-source ESP32-based CAN Bus controller for LianMing (LM) Power Supply Units.**  
 這是一個基於 ESP32 (ESP-IDF) 的開源控制器，專為深圳市聯明電源 (LianMing Power) 的整流模塊設計，透過 CAN Bus 協議實現遠端監控、電壓電流設定及軟啟動保護。
 
-![Version](https://img.shields.io/badge/Version-v1.0.0-green)
+![Version](https://img.shields.io/badge/Version-v1-green)
 ![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5.5.1-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
 
@@ -11,7 +11,7 @@
 
 本專案旨在解決 LM 系列高頻開關整流模塊（如 `LM48-6000AL`, `LM100-6000AL` 等）缺乏便捷控制介面的問題。
 
-**v1.0 重大更新：**
+**v1 重大更新：**
 本版本已從 Arduino 框架完全遷移至 **ESP-IDF (v5.x)** 原生開發環境，採用專業的 **HAL (Hardware Abstraction Layer)** 分層架構，將核心邏輯與硬體驅動完全分離，大幅提升穩定性與可移植性。
 
 ### ✨ 主要功能 (Features)
