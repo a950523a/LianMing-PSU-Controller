@@ -4,7 +4,7 @@
 這是一個基於 ESP32 (ESP-IDF) 的開源控制器，專為深圳市聯明電源 (LianMing Power) 的整流模塊設計，透過 CAN Bus 協議實現遠端監控、電壓電流設定及軟啟動保護。
 
 ![Version](https://img.shields.io/badge/Version-v1.0.0-green)
-![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5.x-blue)
+![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5.5.1-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
 
 ## 📖 專案簡介 (Overview)
