@@ -24,6 +24,8 @@ class IHardwareHAL {
 public:
     virtual ~IHardwareHAL() {}
 
+    virtual void init() = 0; 
+
     // System
     virtual uint32_t getTickCount() = 0; // 回傳毫秒 (ms)
     virtual void delayMs(uint32_t ms) = 0;

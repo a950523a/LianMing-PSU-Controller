@@ -11,6 +11,8 @@ extern IHardwareHAL* getHal();
 extern "C" void app_main(void) {
     // 1. 取得硬體抽象層實體
     IHardwareHAL* hal = getHal();
+
+    hal->init();
     
     hal->uartSend("System Starting...\r\n");
 
