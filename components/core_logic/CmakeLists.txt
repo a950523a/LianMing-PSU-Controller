@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS 
+        "src/psu_protocol.cpp"
+        "src/app_ui.cpp"
+        "src/serial_cmd.cpp"
+    
+    INCLUDE_DIRS 
+        "include"
+        
+    # REQUIRES: 這裡是空的，因為 Core Logic 不依賴硬體或 ESP API
+    # 這樣確保了這部分程式碼可以隨時移植到 STM32 或其他 MCU
+    REQUIRES
+)

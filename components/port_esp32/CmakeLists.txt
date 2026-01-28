@@ -1,0 +1,24 @@
+idf_component_register(
+    SRCS 
+        "src/hal_impl.cpp"
+    
+    INCLUDE_DIRS 
+        "include"
+    
+    # PRIV_REQUIRES: 這些是實作細節需要的依賴 (私有依賴)
+    # driver: 使用 GPIO, TWAI(CAN), UART, I2C
+    # esp_timer: 用於獲取系統時間
+    # log: 用於 ESP_LOG 輸出 (雖然範例中主要用 uartSend)
+    PRIV_REQUIRES 
+        driver 
+        esp_timer 
+        freertos 
+        log
+        u8g2
+        
+    # REQUIRES: 公開依賴
+    # 因為 port_esp32 的 include 檔可能會引用 core_logic 的型別
+    # 且 main 需要同時看到這兩者
+    REQUIRES 
+        core_logic
+)

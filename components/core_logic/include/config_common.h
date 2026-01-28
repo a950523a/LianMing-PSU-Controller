@@ -1,0 +1,10 @@
+#ifndef CONFIG_COMMON_H
+#define CONFIG_COMMON_H
+
+#define PSU_ADDRESS     1
+#define SOFT_START_INITIAL_CURRENT 10.0f
+#define SOFT_START_STEP_CURRENT    10.0f
+#define DEFAULT_TARGET_VOLTAGE     100.0f
+#define DEFAULT_TARGET_CURRENT     6.0f
+
+#endif
