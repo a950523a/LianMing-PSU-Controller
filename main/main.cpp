@@ -26,7 +26,7 @@ extern "C" void app_main(void) {
     serial.begin();
     ui.begin();
     
-    hal->delayMs(1500);
+    hal->delayMs(3000);
     psu.init(PSU_ADDRESS);
     hal->uartSend("PSU Initialized.\r\n");
 
