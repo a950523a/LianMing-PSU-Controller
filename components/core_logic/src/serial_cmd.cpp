@@ -1,4 +1,5 @@
 #include "serial_cmd.h"
+#include "config_common.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,13 +62,23 @@ void SerialCmd::processCommand(char* cmd) {
         _psu->setPower(false);
         _hal->uartSend("CMD_ACK:OFF\r\n");
     } else if (strncmp(cmd, "SET:V=", 6) == 0) {
-        float v = strtof(cmd + 6, NULL);
+        char* end;
+        float v = strtof(cmd + 6, &end);
+        if (end == cmd + 6 || v < 0.0f || v > MAX_TARGET_VOLTAGE) {
+            _hal->uartSend("ERR:V_OUT_OF_RANGE\r\n");
+            return;
+        }
         _psu->setOutput(v, _psu->getStatus().currentSet);
         char buf[32];
         snprintf(buf, sizeof(buf), "CMD_ACK:SET_V:%.1f\r\n", v);
         _hal->uartSend(buf);
     } else if (strncmp(cmd, "SET:I=", 6) == 0) {
-        float i = strtof(cmd + 6, NULL);
+        char* end;
+        float i = strtof(cmd + 6, &end);
+        if (end == cmd + 6 || i < 0.0f || i > MAX_TARGET_CURRENT) {
+            _hal->uartSend("ERR:I_OUT_OF_RANGE\r\n");
+            return;
+        }
         _psu->setOutput(_psu->getStatus().voltageSet, i);
         char buf[32];
         snprintf(buf, sizeof(buf), "CMD_ACK:SET_I:%.1f\r\n", i);

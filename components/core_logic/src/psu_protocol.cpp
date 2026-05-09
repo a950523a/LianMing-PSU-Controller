@@ -151,20 +151,21 @@ void PowerProtocol::parseFrame(const HalCanFrame& frame) {
 
             if (!_startupCheckDone) {
                 if (hwIsOff) {
-                    setPower(true); 
+                    setPower(true);
                 } else {
                     _status.isOn = true;
                     _status.hwRunning = true;
-                    _softStartActive = false; 
+                    _softStartActive = false;
                     _targetVolts = _status.voltageOut;
+                    queryCurrentSetpoint();
                 }
-                _startupCheckDone = true; 
+                _startupCheckDone = true;
             } 
             _status.lastUpdate = _hal->getTickCount();
         } else if (cmdType == 0x02) {
             _status.powerCmdSuccess = (frame.data[1] != 0);
         } else {
-            _status.setCmdSuccess = (frame.data[0] != 0);
+            _status.setCmdSuccess = (frame.data[1] != 0);
         }
     }
     else if (frame.id == (ID_RESP_INPUT + _addr)) {
@@ -174,4 +175,18 @@ void PowerProtocol::parseFrame(const HalCanFrame& frame) {
             _status.newInputVoltage = true;
         }
     }
+    else if (frame.id == (ID_RESP_ISET + _addr)) {
+        uint16_t rawI = (frame.data[0] << 8) | frame.data[1];
+        _targetAmps = rawI / 10.0f;
+        _status.currentSet = _targetAmps;
+    }
+}
+
+void PowerProtocol::queryCurrentSetpoint() {
+    HalCanFrame frame;
+    frame.id = ID_CMD_QUERY_ISET + _addr;
+    frame.len = 0;
+    frame.ext = true;
+    memset(frame.data, 0, 8);
+    _hal->canSend(frame);
 }

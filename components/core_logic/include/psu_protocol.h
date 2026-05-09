@@ -49,13 +49,16 @@ private:
     uint32_t _lastRampTime;
 
     // CAN IDs
-    static const uint32_t ID_CMD_SET     = 0x1907C080;
-    static const uint32_t ID_CMD_QUERY   = 0x1907C080;
-    static const uint32_t ID_RESP_STATUS = 0x1807C080;
+    static const uint32_t ID_CMD_SET       = 0x1907C080;
+    static const uint32_t ID_CMD_QUERY     = 0x1907C080;
+    static const uint32_t ID_RESP_STATUS   = 0x1807C080;
     static const uint32_t ID_CMD_QUERY_IN  = 0x1907A080;
     static const uint32_t ID_RESP_INPUT    = 0x1807A080;
+    static const uint32_t ID_CMD_QUERY_ISET = 0x19010880;
+    static const uint32_t ID_RESP_ISET      = 0x18010880;
 
     void queryStatus();
+    void queryCurrentSetpoint();
     void sendSetCommand(float voltage, float current);
     void parseFrame(const HalCanFrame& frame);
 };

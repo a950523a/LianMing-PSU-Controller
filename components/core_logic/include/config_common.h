@@ -1,10 +1,16 @@
 #ifndef CONFIG_COMMON_H
 #define CONFIG_COMMON_H
 
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+
 #define PSU_ADDRESS     1
 #define SOFT_START_INITIAL_CURRENT 10.0f
 #define SOFT_START_STEP_CURRENT    10.0f
 #define DEFAULT_TARGET_VOLTAGE     100.0f
 #define DEFAULT_TARGET_CURRENT     6.0f
+#define MAX_TARGET_VOLTAGE         120.0f
+#define MAX_TARGET_CURRENT         100.0f
 
 #endif

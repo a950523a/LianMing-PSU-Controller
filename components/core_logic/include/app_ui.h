@@ -24,6 +24,11 @@ private:
     bool lastSel, lastUp, lastDown;
     uint32_t lastDebounce;
 
+    PowerStatus _cachedStatus;
+    PowerStatus _lastDrawnStatus;
+    UIMode _lastDrawnMode;
+    bool _displayDirty;
+
     void handleButtons();
     void drawScreen();
 };

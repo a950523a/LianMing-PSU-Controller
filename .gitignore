@@ -78,3 +78,6 @@ Desktop.ini
 *.sln.docstates # Visual Studio
 .vscode/settings.json
 /.vscode
+
+# Claude Code
+.claude/
