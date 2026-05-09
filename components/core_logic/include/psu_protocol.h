@@ -28,6 +28,7 @@ public:
     
     void setOutput(float voltageV, float currentA);
     void setPower(bool on);
+    void setEqualization(bool enable);
     void queryInputVoltage();
     void clearInputFlag() { _status.newInputVoltage = false; }
     
@@ -54,8 +55,9 @@ private:
     static const uint32_t ID_RESP_STATUS   = 0x1807C080;
     static const uint32_t ID_CMD_QUERY_IN  = 0x1907A080;
     static const uint32_t ID_RESP_INPUT    = 0x1807A080;
-    static const uint32_t ID_CMD_QUERY_ISET = 0x19010880;
-    static const uint32_t ID_RESP_ISET      = 0x18010880;
+    static const uint32_t ID_CMD_QUERY_ISET  = 0x19010880;
+    static const uint32_t ID_RESP_ISET       = 0x18010880;
+    static const uint32_t ID_CMD_EQUALIZE    = 0x19C21880;
 
     void queryStatus();
     void queryCurrentSetpoint();

@@ -190,3 +190,13 @@ void PowerProtocol::queryCurrentSetpoint() {
     memset(frame.data, 0, 8);
     _hal->canSend(frame);
 }
+
+void PowerProtocol::setEqualization(bool enable) {
+    HalCanFrame frame;
+    frame.id = ID_CMD_EQUALIZE;
+    frame.len = 6;
+    frame.ext = true;
+    memset(frame.data, 0, 8);
+    frame.data[3] = enable ? 0xAA : 0x55;
+    _hal->canSend(frame);
+}

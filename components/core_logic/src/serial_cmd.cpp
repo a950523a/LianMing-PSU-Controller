@@ -86,5 +86,11 @@ void SerialCmd::processCommand(char* cmd) {
     } else if (strcmp(cmd, "GET:AC") == 0) {
         _psu->queryInputVoltage();
         _hal->uartSend("CMD_ACK:QUERY_AC\r\n");
+    } else if (strcmp(cmd, "EQ:ON") == 0) {
+        _psu->setEqualization(true);
+        _hal->uartSend("CMD_ACK:EQ_ON\r\n");
+    } else if (strcmp(cmd, "EQ:OFF") == 0) {
+        _psu->setEqualization(false);
+        _hal->uartSend("CMD_ACK:EQ_OFF\r\n");
     }
 }
