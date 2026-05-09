@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectifier PSU modules (e.g., LM48-6000AL, LM100-6000AL). Built with ESP-IDF v5.5.1+ (not Arduino). Licensed CC BY-NC-SA 4.0 (non-commercial).
 
+Current version: **v1.2.0** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
+
 ## Build Commands
 
 Requires ESP-IDF v5.5.1+ toolchain (`idf.py` on PATH).
@@ -20,14 +22,22 @@ idf.py build
 # Flash and open serial monitor (replace COMx with actual port)
 idf.py -p COMx flash monitor
 
-# Build only, no flash
-idf.py build
+# Force CMake re-configure (e.g. after tagging a new version)
+idf.py reconfigure
 
 # Clean build
 idf.py fullclean
 ```
 
 There is no test suite — validation is hardware-in-the-loop via serial monitor and CAN Bus inspection.
+
+## Versioning
+
+`FIRMWARE_VERSION` is injected at build time by `CMakeLists.txt` via `git describe --tags --always --dirty`. CMake auto-reconfigures when `.git/HEAD` changes (new commit or branch switch).
+
+- Tag a release: `git tag -a v1.x.0 -m "..."` then `git push origin vX.x.0`
+- Between tags the version will be `vX.x.0-N-gHASH`; with uncommitted changes it appends `-dirty`
+- `config_common.h` only defines a `#ifndef FIRMWARE_VERSION` fallback — never set it there directly
 
 ## Architecture
 
@@ -45,10 +55,10 @@ main/main.cpp
 
 **`components/core_logic/`** — Pure C++ business logic, **zero ESP-IDF dependencies**. Portable and hardware-agnostic.
 - `include/hal_interface.h` — `IHardwareHAL` abstract base class; all hardware access goes through this interface
-- `include/config_common.h` — Hardware-agnostic constants (PSU address, soft-start parameters, voltage/current defaults)
-- `psu_protocol.{h,cpp}` — CAN Bus protocol, soft-start (initial 10A, +10A steps), periodic status queries
-- `app_ui.{h,cpp}` — Button-driven UI with 3 modes: Monitor, Set Voltage, Set Current
-- `serial_cmd.{h,cpp}` — UART command parser (`SET:V=`, `SET:I=`, `ON`, `OFF`, `GET:AC`)
+- `include/config_common.h` — Hardware-agnostic constants (PSU address, soft-start parameters, voltage/current limits)
+- `psu_protocol.{h,cpp}` — CAN Bus protocol, soft-start FSM (10A initial, +10A steps), periodic status queries, equalization control
+- `app_ui.{h,cpp}` — Button-driven UI with 3 modes: Monitor, Set Voltage, Set Current; dirty-flag OLED rendering
+- `serial_cmd.{h,cpp}` — UART command parser with input validation
 
 **`components/port_esp32/`** — Concrete `IHardwareHAL` implementation using ESP-IDF drivers.
 - `include/port_def.h` — Pin assignments and hardware constants
@@ -74,11 +84,29 @@ Buttons are active-low. OLED I2C address is 0x3C. Debug output is on UART0 (USB)
 
 ### CAN / UART Protocol
 
-UART2 commands (115200 baud): `SET:V=100.0`, `SET:I=50.0`, `ON`, `OFF`, `GET:AC`  
-Auto-report every 100ms: `V=xx.x,I=xx.x`
+UART2 commands (115200 baud):
+
+| Command | Description |
+|---|---|
+| `SET:V=100.0` | Set output voltage (0 – MAX_TARGET_VOLTAGE) |
+| `SET:I=50.0` | Set current limit (0 – MAX_TARGET_CURRENT) |
+| `ON` / `OFF` | Power on/off with soft-start |
+| `GET:AC` | Query AC input voltage (replies `AC=xxx.x`) |
+| `EQ:ON` / `EQ:OFF` | Enable/disable multi-module CAN equalization (broadcast) |
+
+Auto-report every 100ms: `V=xx.x,I=xx.x`  
+Invalid range or non-numeric input replies: `ERR:V_OUT_OF_RANGE` / `ERR:I_OUT_OF_RANGE`
 
 CAN Bus follows the LianMing rectifier module protocol (proprietary framing in `psu_protocol.cpp`).  
 Official protocol spec: `docs/联明电源数字电源模块CAN通讯协议V2.0 (1).pdf` — cross-reference this when modifying CAN frame parsing.
+
+### Safety Limits
+
+Defined in `config_common.h` — adjust here for different PSU models:
+- `MAX_TARGET_VOLTAGE 120.0f`
+- `MAX_TARGET_CURRENT 100.0f`
+
+Both serial commands and UI button increments are clamped to these limits.
 
 ## Development Environment
 
@@ -94,6 +122,8 @@ Two supported setups:
 - `core_logic/` must remain free of ESP-IDF includes so it stays portable.
 - New hardware peripherals: add virtual methods to `hal_interface.h`, implement in `hal_impl.cpp`, update `port_def.h` for pin assignments.
 - New UI modes: extend the state machine in `app_ui.cpp` and update `AppUIMode` enum.
+- `AppUI::loop()` caches `PowerStatus` once per tick in `_cachedStatus`; use this in `handleButtons()` and `drawScreen()` — do not call `_psu->getStatus()` directly inside those methods.
+- OLED is only redrawn when `_displayDirty` is true; set this flag on any state or value change.
 
 ## Portability Status
 
@@ -105,4 +135,5 @@ Two supported setups:
 
 - `ID_CMD_SET == ID_CMD_QUERY == 0x1907C080` is **intentional** — CMD=0/1/2 share the same CAN ID, distinguished by `data[0]`. Confirmed against PDF examples.
 - All CAN frame byte offsets in `parseFrame()` verified correct against spec examples.
-- Voltage/current safety limits defined in `config_common.h` as `MAX_TARGET_VOLTAGE` / `MAX_TARGET_CURRENT`.
+- Multi-module equalization: broadcast ID `0x19C21880`, 6-byte frame, `data[3] = 0xAA` (on) / `0x55` (off). No reply expected.
+- Startup sequence: first status response auto-detects PSU state; if already ON, queries current setpoint via `0x19010880` to sync `_targetAmps`.
