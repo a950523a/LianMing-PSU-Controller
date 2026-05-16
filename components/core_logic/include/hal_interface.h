@@ -46,6 +46,12 @@ public:
     virtual void displayClear() = 0;
     virtual void displayDrawString(int x, int y, const char* str, int fontSize) = 0; // fontSize: 0=Small, 1=Large
     virtual void displayShow() = 0;
+
+    // Transport (UART=0 / ESP-NOW=1) — no-op defaults keep core_logic portable
+    virtual void triggerPairing() {}
+    virtual bool isPairingActive() { return false; }
+    virtual void setTransport(int mode) { (void)mode; }
+    virtual int  getTransport() { return 0; }
 };
 
 #endif // HAL_INTERFACE_H

@@ -6,6 +6,9 @@
 #endif
 
 #define PSU_ADDRESS     1
+
+#define TRANSPORT_UART    0
+#define TRANSPORT_ESPNOW  1
 #define SOFT_START_INITIAL_CURRENT 10.0f
 #define SOFT_START_STEP_CURRENT    10.0f
 #define DEFAULT_TARGET_VOLTAGE     100.0f

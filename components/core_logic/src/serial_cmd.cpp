@@ -92,5 +92,12 @@ void SerialCmd::processCommand(char* cmd) {
     } else if (strcmp(cmd, "EQ:OFF") == 0) {
         _psu->setEqualization(false);
         _hal->uartSend("CMD_ACK:EQ_OFF\r\n");
+    } else if (strcmp(cmd, "PAIR") == 0) {
+        _hal->triggerPairing();
+        _hal->uartSend("CMD_ACK:PAIR\r\n");
+    } else if (strncmp(cmd, "SET:TRANSPORT=", 14) == 0) {
+        int mode = atoi(cmd + 14);
+        _hal->setTransport(mode);
+        _hal->uartSend("CMD_ACK:SET_TRANSPORT\r\n");
     }
 }
