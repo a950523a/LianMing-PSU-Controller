@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-SerialCmd::SerialCmd(IHardwareHAL* hal, PowerProtocol* psu) 
-    : _hal(hal), _psu(psu), _bufIndex(0), _lastReportTime(0) {
+SerialCmd::SerialCmd(IHardwareHAL* hal, PowerProtocol* psu)
+    : _hal(hal), _psu(psu), _bufIndex(0), _lastReportTime(0), _lastHbTime(0) {
     memset(_inputBuffer, 0, BUF_SIZE);
 }
 
@@ -32,10 +32,23 @@ void SerialCmd::loop() {
         }
     }
 
-    // 2. Periodic Report
-    if (_hal->getTickCount() - _lastReportTime >= 100) {
-        sendPeriodicReport();
-        _lastReportTime = _hal->getTickCount();
+    // 2. Telemetry: V/I @ 200ms when outputting, HB @ 1000ms when standby
+    PowerStatus st = _psu->getStatus();
+    uint32_t now   = _hal->getTickCount();
+    bool outputting = (st.voltageOut >= 1.0f);
+
+    if (outputting) {
+        if (now - _lastReportTime >= 100) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "V=%.1f,I=%.1f\n", st.voltageOut, st.currentOut);
+            _hal->uartSend(buf);
+            _lastReportTime = now;
+        }
+    } else {
+        if (now - _lastHbTime >= 1000) {
+            _hal->uartSend("HB\n");
+            _lastHbTime = now;
+        }
     }
 
     if (_psu->getStatus().newInputVoltage) {
@@ -44,13 +57,6 @@ void SerialCmd::loop() {
         _hal->uartSend(buf);
         _psu->clearInputFlag();
     }
-}
-
-void SerialCmd::sendPeriodicReport() {
-    PowerStatus st = _psu->getStatus();
-    char buf[64];
-    snprintf(buf, sizeof(buf), "V=%.1f,I=%.1f\r\n", st.voltageOut, st.currentOut);
-    _hal->uartSend(buf);
 }
 
 void SerialCmd::processCommand(char* cmd) {

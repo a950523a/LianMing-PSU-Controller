@@ -17,10 +17,10 @@ private:
     static const int BUF_SIZE = 64;
     char _inputBuffer[BUF_SIZE];
     int _bufIndex;
-    uint32_t _lastReportTime;
+    uint32_t _lastReportTime;  // last V/I telemetry sent (200ms interval)
+    uint32_t _lastHbTime;      // last HB heartbeat sent  (1000ms interval)
 
     void processCommand(char* cmd);
-    void sendPeriodicReport();
 };
 
 #endif
