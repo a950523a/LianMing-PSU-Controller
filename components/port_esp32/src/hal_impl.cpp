@@ -67,6 +67,13 @@ uint8_t u8x8_byte_esp32_hw_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void 
 }
 
 // ──────────────────────────────────────────────────────────────
+// WiFi AP credentials (web control interface)
+// ──────────────────────────────────────────────────────────────
+
+#define AP_SSID "PSU-Controller"
+#define AP_PASS "psu12345"
+
+// ──────────────────────────────────────────────────────────────
 // Transport / ESP-NOW state
 // ──────────────────────────────────────────────────────────────
 
@@ -420,11 +427,26 @@ private:
             ESP_ERROR_CHECK(err);
         }
 
+        // AP netif 提供 DHCP server 給 web 控制頁面的客戶端
+        esp_netif_create_default_wifi_ap();
+
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
         ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+
+        // 設定 SoftAP：SSID/密碼、最多 3 台客戶端
+        wifi_config_t ap_cfg = {};
+        strncpy((char*)ap_cfg.ap.ssid,     AP_SSID, sizeof(ap_cfg.ap.ssid));
+        strncpy((char*)ap_cfg.ap.password, AP_PASS,  sizeof(ap_cfg.ap.password));
+        ap_cfg.ap.ssid_len       = (uint8_t)strlen(AP_SSID);
+        ap_cfg.ap.max_connection = 3;
+        ap_cfg.ap.authmode       = WIFI_AUTH_WPA2_PSK;
+        ap_cfg.ap.channel        = 1;
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
+
         ESP_ERROR_CHECK(esp_wifi_start());
+        printf("WiFi AP started: SSID=%s  Password=%s  IP=192.168.4.1\n", AP_SSID, AP_PASS);
 
         ESP_ERROR_CHECK(esp_now_init());
         ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));

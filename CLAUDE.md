@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectifier PSU modules (e.g., LM48-6000AL, LM100-6000AL). Built with ESP-IDF v5.5.1+ (not Arduino). Licensed CC BY-NC-SA 4.0 (non-commercial).
 
-Current version: **v1.2.0** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
+Current version: **v1.3.0** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
 
 ## Build Commands
 
@@ -31,6 +31,19 @@ idf.py fullclean
 
 There is no test suite — validation is hardware-in-the-loop via serial monitor and CAN Bus inspection.
 
+## OTA Update Workflow
+
+1. Build firmware: `idf.py build`
+2. **First-time OTA setup** (partition table changed from single-app → dual OTA):
+   ```bash
+   idf.py erase-flash   # required once to clear old partition table
+   idf.py flash
+   ```
+3. Subsequent OTA: connect to WiFi `PSU-Controller` (pw: `psu12345`), open `http://192.168.4.1`, upload `build/LianMing-PSU-Controller.bin` via the OTA section.
+4. Device reboots and runs new firmware. The previous slot is kept as rollback (future).
+
+`partitions.csv` defines the dual-OTA layout (two × 960KB slots, fits 2MB flash). If hardware has 4MB flash, enlarge `ota_0`/`ota_1` to `0x1E0000` each for more headroom.
+
 ## Versioning
 
 `FIRMWARE_VERSION` is injected at build time by `CMakeLists.txt` via `git describe --tags --always --dirty`. CMake auto-reconfigures when `.git/HEAD` changes (new commit or branch switch).
@@ -48,10 +61,17 @@ main/main.cpp
     └── Instantiates HalImpl (port_esp32) → injects into:
             ├── PowerProtocol (psu_protocol)   — CAN Bus messaging, soft-start FSM
             ├── AppUI (app_ui)                 — OLED display, 3-mode UI state machine
-            └── SerialCmd (serial_cmd)         — UART command parser
+            ├── SerialCmd (serial_cmd)         — UART command parser
+            └── WebCtrl (web_ctrl)             — HTTP server, REST API, OTA upload
 ```
 
 ### Components
+
+**`components/web_ctrl/`** — ESP32-specific HTTP server and OTA update service.
+- `include/web_ctrl.h` / `src/web_ctrl.cpp` — `WebCtrl` class; `begin()` starts the HTTP server; `processCommands()` drains the web command queue (must be called from main loop)
+- REST API: `GET /api/status` → JSON, `POST /api/cmd` → JSON command, `POST /api/ota` → raw `.bin` OTA upload
+- WiFi AP: SSID `PSU-Controller`, password `psu12345`, URL `http://192.168.4.1`
+- OTA: uploads to the next OTA partition, sets it as boot, then restarts. Requires `partitions.csv` (dual OTA layout)
 
 **`components/core_logic/`** — Pure C++ business logic, **zero ESP-IDF dependencies**. Portable and hardware-agnostic.
 - `include/hal_interface.h` — `IHardwareHAL` abstract base class; all hardware access goes through this interface
@@ -60,7 +80,7 @@ main/main.cpp
 - `app_ui.{h,cpp}` — Button-driven UI with 3 modes: Monitor, Set Voltage, Set Current; dirty-flag OLED rendering
 - `serial_cmd.{h,cpp}` — UART command parser with input validation
 
-**`components/port_esp32/`** — Concrete `IHardwareHAL` implementation using ESP-IDF drivers.
+**`components/port_esp32/`** — Concrete `IHardwareHAL` implementation using ESP-IDF drivers. WiFi runs in `WIFI_MODE_APSTA`: AP interface (192.168.4.1) serves the web UI; STA interface is used by ESP-NOW.
 - `include/port_def.h` — Pin assignments and hardware constants
 - `src/hal_impl.cpp` — Drives CAN (TWAI), UART2, I2C, GPIO, timers, and OLED via U8g2
 

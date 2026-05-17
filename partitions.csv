@@ -1,0 +1,15 @@
+# LianMing PSU Controller — custom OTA partition table (2MB flash)
+# Each OTA slot is 960KB.  Flash layout:
+#   0x000000-0x008000  Bootloader (managed by IDF, not listed here)
+#   0x008000-0x009000  Partition table
+#   0x009000           nvs / otadata / app0 / app1
+#
+# NOTE: After switching from single-app to this layout, run:
+#   idf.py erase-flash && idf.py flash
+# to avoid partition-table mismatch at boot.
+#
+# Name,    Type, SubType, Offset,   Size,    Flags
+nvs,       data, nvs,     0x9000,   0x4000,
+otadata,   data, ota,     0xD000,   0x2000,
+ota_0,     app,  ota_0,   0x10000,  0xF0000,
+ota_1,     app,  ota_1,   0x100000, 0xF0000,
