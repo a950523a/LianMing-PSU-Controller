@@ -273,7 +273,7 @@ static esp_err_t handle_cmd(httpd_req_t* req) {
 
 static esp_err_t handle_ota(httpd_req_t* req) {
     if (s_ota_running) {
-        httpd_resp_send_err(req, HTTPD_503_SERVICE_UNAVAILABLE, "OTA already in progress");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA already in progress");
         return ESP_FAIL;
     }
     if (req->content_len == 0) {
