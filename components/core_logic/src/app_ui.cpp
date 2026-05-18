@@ -13,6 +13,12 @@ AppUI::AppUI(IHardwareHAL* hal, PowerProtocol* psu)
     _lastDrawnMode = MODE_MONITOR;
     memset(&_cachedStatus, 0, sizeof(_cachedStatus));
     memset(&_lastDrawnStatus, 0, sizeof(_lastDrawnStatus));
+    _cachedTransport = -1;
+    _cachedPaired    = false;
+    _cachedPairing   = false;
+    _lastDrawnTransport = -1;
+    _lastDrawnPaired    = false;
+    _lastDrawnPairing   = false;
 }
 
 void AppUI::begin() {
@@ -20,7 +26,10 @@ void AppUI::begin() {
 }
 
 void AppUI::loop() {
-    _cachedStatus = _psu->getStatus();
+    _cachedStatus    = _psu->getStatus();
+    _cachedTransport = _hal->getTransport();
+    _cachedPaired    = _hal->isPairedEspNow();
+    _cachedPairing   = _hal->isPairingActive();
 
     if (_cachedStatus.voltageOut      != _lastDrawnStatus.voltageOut     ||
         _cachedStatus.currentOut      != _lastDrawnStatus.currentOut     ||
@@ -28,7 +37,10 @@ void AppUI::loop() {
         _cachedStatus.currentSet      != _lastDrawnStatus.currentSet     ||
         _cachedStatus.isOn            != _lastDrawnStatus.isOn           ||
         _cachedStatus.isSoftStarting  != _lastDrawnStatus.isSoftStarting ||
-        _cachedStatus.setCmdSuccess   != _lastDrawnStatus.setCmdSuccess) {
+        _cachedStatus.setCmdSuccess   != _lastDrawnStatus.setCmdSuccess  ||
+        _cachedTransport != _lastDrawnTransport                          ||
+        _cachedPaired    != _lastDrawnPaired                             ||
+        _cachedPairing   != _lastDrawnPairing) {
         _displayDirty = true;
     }
 
@@ -36,8 +48,11 @@ void AppUI::loop() {
 
     if (_displayDirty) {
         drawScreen();
-        _lastDrawnStatus = _cachedStatus;
-        _lastDrawnMode = _mode;
+        _lastDrawnStatus    = _cachedStatus;
+        _lastDrawnMode      = _mode;
+        _lastDrawnTransport = _cachedTransport;
+        _lastDrawnPaired    = _cachedPaired;
+        _lastDrawnPairing   = _cachedPairing;
         _displayDirty = false;
     }
 }
@@ -92,11 +107,20 @@ void AppUI::drawScreen() {
     _hal->displayClear();
     char buf[32];
 
-    snprintf(buf, sizeof(buf), "Addr:%d %s", PSU_ADDRESS,
-             _cachedStatus.isSoftStarting ? "SOFT" : (_cachedStatus.isOn ? "ON" : "OFF"));
-    _hal->displayDrawString(0, 0, buf, 0);
+    // Transport indicator: UA=UART, EN=ESP-NOW paired, E?=ESP-NOW unpaired, PR=pairing
+    const char* tr;
+    if (_cachedPairing)          tr = "PR";
+    else if (_cachedTransport == 1) tr = (_cachedPaired ? "EN" : "E?");
+    else                         tr = "UA";
 
-    if (_cachedStatus.setCmdSuccess) _hal->displayDrawString(50, 0, "ACK", 0);
+    const char* pwr = _cachedStatus.isSoftStarting ? "SS"
+                    : (_cachedStatus.isOn           ? "ON" : "--");
+
+    snprintf(buf, sizeof(buf), "A%d %s%s [%s]",
+             PSU_ADDRESS, pwr,
+             _cachedStatus.setCmdSuccess ? "*" : " ",
+             tr);
+    _hal->displayDrawString(0, 0, buf, 0);
 
     snprintf(buf, sizeof(buf), "V: %5.1f V", _cachedStatus.voltageOut);
     _hal->displayDrawString(0, 20, buf, 1);

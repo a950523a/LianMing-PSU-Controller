@@ -81,6 +81,7 @@ uint8_t u8x8_byte_esp32_hw_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void 
 static int     s_transport      = TRANSPORT_UART;
 static uint8_t s_tes_mac[6]     = {0};
 static bool    s_tes_mac_valid  = false;
+static volatile bool s_espnow_send_ok = true;
 
 // RX ring buffer (single-producer ESP-NOW task, single-consumer main task)
 #define ESPNOW_RX_BUF_SIZE 256
@@ -171,6 +172,13 @@ static void espnow_add_peer(const uint8_t *mac) {
 // ──────────────────────────────────────────────────────────────
 // ESP-NOW callbacks
 // ──────────────────────────────────────────────────────────────
+
+static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
+    s_espnow_send_ok = (status == ESP_NOW_SEND_SUCCESS);
+    if (!s_espnow_send_ok) {
+        printf("ESP-NOW: TX to " MACSTR " failed\n", MAC2STR(tx_info->des_addr));
+    }
+}
 
 static void espnow_recv_cb(const esp_now_recv_info_t *info,
                             const uint8_t *data, int len) {
@@ -351,6 +359,18 @@ public:
         return s_transport;
     }
 
+    bool isPairedEspNow() override {
+        return s_tes_mac_valid;
+    }
+
+    void getEspNowPeerMac(char* buf, size_t len) override {
+        if (!s_tes_mac_valid || len < 18) {
+            if (len > 0) buf[0] = '\0';
+            return;
+        }
+        snprintf(buf, len, MACSTR, MAC2STR(s_tes_mac));
+    }
+
     // ── Display (U8g2) ──────────────────────────────────────
 
     void displayClear() override {
@@ -451,6 +471,7 @@ private:
 
         ESP_ERROR_CHECK(esp_now_init());
         ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
+        ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
 
         // 廣播 peer（配對 hello 需要）
         static const uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};

@@ -52,6 +52,8 @@ public:
     virtual bool isPairingActive() { return false; }
     virtual void setTransport(int mode) { (void)mode; }
     virtual int  getTransport() { return 0; }
+    virtual bool isPairedEspNow() { return false; }
+    virtual void getEspNowPeerMac(char* buf, size_t len) { if (len > 0) buf[0] = '\0'; }
 };
 
 #endif // HAL_INTERFACE_H

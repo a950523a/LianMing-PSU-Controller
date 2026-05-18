@@ -105,5 +105,15 @@ void SerialCmd::processCommand(char* cmd) {
         int mode = atoi(cmd + 14);
         _hal->setTransport(mode);
         _hal->uartSend("CMD_ACK:SET_TRANSPORT\r\n");
+    } else if (strcmp(cmd, "STATUS:TRANSPORT") == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "TRANSPORT=%d\r\n", _hal->getTransport());
+        _hal->uartSend(buf);
+    } else if (strcmp(cmd, "STATUS:PAIR") == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "PAIRED=%d,PAIRING=%d\r\n",
+                 _hal->isPairedEspNow() ? 1 : 0,
+                 _hal->isPairingActive() ? 1 : 0);
+        _hal->uartSend(buf);
     }
 }

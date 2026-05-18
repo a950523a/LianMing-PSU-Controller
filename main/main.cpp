@@ -17,7 +17,7 @@ extern "C" void app_main(void) {
     PowerProtocol psu(hal);
     AppUI         ui(hal, &psu);
     SerialCmd     serial(hal, &psu);
-    WebCtrl       web(&psu);
+    WebCtrl       web(&psu, hal);
 
     serial.begin();
     ui.begin();

@@ -29,6 +29,13 @@ private:
     UIMode _lastDrawnMode;
     bool _displayDirty;
 
+    int  _cachedTransport;
+    bool _cachedPaired;
+    bool _cachedPairing;
+    int  _lastDrawnTransport;
+    bool _lastDrawnPaired;
+    bool _lastDrawnPairing;
+
     void handleButtons();
     void drawScreen();
 };

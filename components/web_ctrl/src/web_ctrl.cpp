@@ -109,6 +109,27 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
 </div>
 
 <div class="card">
+  <h2>ESP-NOW 傳輸</h2>
+  <div class="row">
+    <span class="lbl">傳輸模式</span>
+    <span id="tr-badge" class="badge off">--</span>
+  </div>
+  <div class="row">
+    <span class="lbl">配對狀態</span>
+    <span id="pr-badge" class="badge off">--</span>
+  </div>
+  <div class="row">
+    <span class="lbl">TES MAC</span>
+    <span id="peer-mac" class="val" style="font-size:.75em">--</span>
+  </div>
+  <div class="btns">
+    <button onclick="pairCmd()" class="full">開始配對 (10s 視窗)</button>
+    <button onclick="setTransport(0)">切換 UART</button>
+    <button onclick="setTransport(1)">切換 ESP-NOW</button>
+  </div>
+</div>
+
+<div class="card">
   <h2>OTA 韌體更新</h2>
   <div class="lbl">選擇 <b>.bin</b> 韌體檔後點「上傳」，裝置更新完成後自動重新啟動。</div>
   <input type="file" id="fw" accept=".bin">
@@ -133,6 +154,17 @@ async function fetchStatus() {
     if (d.softstart) { st.textContent='SOFT-START'; st.className='badge ss'; }
     else if (d.on)   { st.textContent='ON';         st.className='badge on'; }
     else             { st.textContent='OFF';         st.className='badge off'; }
+
+    const trB = document.getElementById('tr-badge');
+    if (d.transport===1) { trB.textContent='ESP-NOW'; trB.className='badge on'; }
+    else                 { trB.textContent='UART';    trB.className='badge off'; }
+
+    const prB = document.getElementById('pr-badge');
+    if (d.pairing)      { prB.textContent='配對中…'; prB.className='badge ss'; }
+    else if (d.paired)  { prB.textContent='已配對';  prB.className='badge on'; }
+    else                { prB.textContent='未配對';  prB.className='badge off'; }
+
+    document.getElementById('peer-mac').textContent = d.peer_mac || '--';
   } catch(e) {}
 }
 
@@ -143,6 +175,13 @@ async function cmd(c) {
       body: JSON.stringify({cmd: c})
     });
   } catch(e) {}
+}
+
+async function pairCmd() {
+  try { await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'PAIR'})}); } catch(e){}
+}
+async function setTransport(m) {
+  try { await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'SET_TRANSPORT',mode:m})}); } catch(e){}
 }
 
 async function setVI() {
@@ -217,6 +256,13 @@ static esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddBoolToObject  (root, "eq",        false);
     cJSON_AddStringToObject(root, "version",   FIRMWARE_VERSION);
 
+    char peer_mac[18] = {};
+    self->_hal->getEspNowPeerMac(peer_mac, sizeof(peer_mac));
+    cJSON_AddNumberToObject(root, "transport", self->_hal->getTransport());
+    cJSON_AddBoolToObject  (root, "paired",    self->_hal->isPairedEspNow());
+    cJSON_AddBoolToObject  (root, "pairing",   self->_hal->isPairingActive());
+    cJSON_AddStringToObject(root, "peer_mac",  peer_mac[0] ? peer_mac : "--");
+
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
@@ -248,12 +294,18 @@ static esp_err_t handle_cmd(httpd_req_t* req) {
         WebCmd      wc = {};
         const char* cs = jcmd->valuestring;
 
-        if      (strcmp(cs, "ON")       == 0) { wc.type = WebCmd::ON; }
-        else if (strcmp(cs, "OFF")      == 0) { wc.type = WebCmd::OFF; }
-        else if (strcmp(cs, "EQ_ON")    == 0) { wc.type = WebCmd::EQ_ON; }
-        else if (strcmp(cs, "EQ_OFF")   == 0) { wc.type = WebCmd::EQ_OFF; }
-        else if (strcmp(cs, "QUERY_AC") == 0) { wc.type = WebCmd::QUERY_AC; }
-        else if (strcmp(cs, "SET")      == 0) {
+        if      (strcmp(cs, "ON")            == 0) { wc.type = WebCmd::ON; }
+        else if (strcmp(cs, "OFF")           == 0) { wc.type = WebCmd::OFF; }
+        else if (strcmp(cs, "EQ_ON")         == 0) { wc.type = WebCmd::EQ_ON; }
+        else if (strcmp(cs, "EQ_OFF")        == 0) { wc.type = WebCmd::EQ_OFF; }
+        else if (strcmp(cs, "QUERY_AC")      == 0) { wc.type = WebCmd::QUERY_AC; }
+        else if (strcmp(cs, "PAIR")          == 0) { wc.type = WebCmd::PAIR; }
+        else if (strcmp(cs, "SET_TRANSPORT") == 0) {
+            wc.type = WebCmd::SET_TRANSPORT;
+            cJSON* jm = cJSON_GetObjectItemCaseSensitive(root, "mode");
+            wc.transport_mode = cJSON_IsNumber(jm) ? (int)jm->valuedouble : 0;
+        }
+        else if (strcmp(cs, "SET")           == 0) {
             wc.type = WebCmd::SET_VI;
             cJSON* jv = cJSON_GetObjectItemCaseSensitive(root, "v");
             cJSON* ji = cJSON_GetObjectItemCaseSensitive(root, "i");
@@ -330,8 +382,8 @@ static esp_err_t handle_ota(httpd_req_t* req) {
 
 // ── WebCtrl public API ────────────────────────────────────────────────────────
 
-WebCtrl::WebCtrl(PowerProtocol* psu)
-    : _psu(psu), _cmdQueue(nullptr) {}
+WebCtrl::WebCtrl(PowerProtocol* psu, IHardwareHAL* hal)
+    : _psu(psu), _hal(hal), _cmdQueue(nullptr) {}
 
 void WebCtrl::begin() {
     _cmdQueue = xQueueCreate(8, sizeof(WebCmd));
@@ -370,9 +422,11 @@ void WebCtrl::processCommands() {
             case WebCmd::ON:       _psu->setPower(true);          break;
             case WebCmd::OFF:      _psu->setPower(false);         break;
             case WebCmd::SET_VI:   _psu->setOutput(wc.v, wc.i);  break;
-            case WebCmd::EQ_ON:    _psu->setEqualization(true);   break;
-            case WebCmd::EQ_OFF:   _psu->setEqualization(false);  break;
-            case WebCmd::QUERY_AC: _psu->queryInputVoltage();     break;
+            case WebCmd::EQ_ON:         _psu->setEqualization(true);         break;
+            case WebCmd::EQ_OFF:        _psu->setEqualization(false);        break;
+            case WebCmd::QUERY_AC:      _psu->queryInputVoltage();           break;
+            case WebCmd::PAIR:          _hal->triggerPairing();              break;
+            case WebCmd::SET_TRANSPORT: _hal->setTransport(wc.transport_mode); break;
             default: break;
         }
     }
