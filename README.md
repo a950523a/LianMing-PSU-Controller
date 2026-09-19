@@ -51,8 +51,8 @@
 | :--- | :--- | :--- |
 | **GPIO 5** | CAN TX | 接 CAN 收發器 TX |
 | **GPIO 4** | CAN RX | 接 CAN 收發器 RX |
-| **GPIO 21** | I2C SDA | OLED SDA |
-| **GPIO 22** | I2C SCL | OLED SCL |
+| **GPIO 22** | I2C SDA | OLED SDA |
+| **GPIO 21** | I2C SCL | OLED SCL |
 | **GPIO 16** | UART2 RX | Command Port（接外部控制器 TX） |
 | **GPIO 17** | UART2 TX | Command Port（接外部控制器 RX） |
 | **GPIO 1**  | UART0 TX | Debug Port（USB 串列監控） |
