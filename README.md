@@ -9,15 +9,7 @@
 
 ---
 
-> ## ⏸ 專案狀態：暫停更新
->
-> **本專案因個人規劃，自 2026-09-15 起暫停更新。**
->
-> - 既有的程式碼、硬體設計與文件**維持公開**，可自由依授權條款使用。
-> - 新功能開發暫停；**Issue 與 PR 可能不會回覆**。
-> - 與本專案配對使用的 [TES 充電控制器](https://github.com/a950523a/TES-Taiwan-Electric-Scooter-Charging-Controller) 同步暫停更新。
->
-> 恢復更新時會更新本節。
+> 🔗 與本專案配對使用：[TES 充電控制器](https://github.com/a950523a/TES-Taiwan-Electric-Scooter-Charging-Controller)。
 
 ---
 
@@ -330,12 +322,8 @@ CC BY-NC-SA 4.0 **只授權著作權，不授權專利權**。這是授權條款
 >
 > （本公眾授權條款不授權專利權與商標權。）
 
-因此，本專案以開源授權公開，**不代表作者放棄或授予任何專利權利**。作者保留就本
-專案所涉技術方案申請專利之權利，以及已取得或未來取得之一切專利權利。如需專利
-授權或商業使用授權，請另行聯絡作者。
-
-> ⚠️ 目前尚未提出任何專利申請。本節是權利保留聲明，**不是**「專利申請中
-> （Patent Pending）」的標示。本節文字未經法律專業審閱。
+因此，依 CC BY-NC-SA 4.0 使用本專案者，僅取得著作權範圍內之授權。如需商業使用
+授權，請另行聯絡作者。
 
 Copyright (c) 2025-2026 Chris Huang.
 All rights not expressly granted under the above license are reserved.
