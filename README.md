@@ -4,7 +4,7 @@
 這是一個基於 ESP32 (ESP-IDF) 的開源控制器，專為深圳市聯明電源 (LianMing Power) 的整流模塊設計，透過 CAN Bus 協議實現遠端監控、電壓電流設定及軟啟動保護。
 
 ![Version](https://img.shields.io/badge/Version-v1.3.0-green)
-![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5.5.1-blue)
+![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5.5.5-blue)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
 
 ---
@@ -60,7 +60,7 @@
 ## 💻 軟體安裝 (Installation)
 
 ### 前置需求
-- ESP-IDF v5.5.1 或更高版本
+- ESP-IDF v5.5.5（與 TES 充電控制器同版）
 - VS Code + ESP-IDF Extension（建議）
 
 ### 編譯與燒錄
@@ -99,13 +99,57 @@ components/
 
 ## 📡 通訊協議 (Communication)
 
-控制器支援三種控制介面，使用相同的指令語法：**UART**、**ESP-NOW**、**Web API**。
+指令埠（UART 或 ESP-NOW）上同時跑兩種內容，靠每一行的第一個字元區分：
+
+| 行的開頭 | 內容 | 對象 |
+| :--- | :--- | :--- |
+| `$` | **連線協定**：與 TES 充電控制板之間的機器對機器訊息 | TES 控制板 |
+| 其他 | **文字指令**：`ON`、`PAIR`、`SET:TRANSPORT=1`… | 人（序列埠終端機） |
+
+TES 控制板會忽略不是 `$` 開頭的行，所以兩者可以共用同一個埠。
 
 ---
 
-### 1. UART 指令介面（Command Port）
+### 1. 連線協定（與 TES 控制板）
+
+格式與編解碼定義在共用子模組 [PSU-Link](https://github.com/a950523a/PSU-Link)
+（`components/psu_link`），TES 控制板與本專案用的是同一份程式碼。
+初次 clone 後記得執行 `git submodule update --init`。
+
+```
+$<類型>,<欄位>,...*<CRC16>
+
+```
+
+- 每行結尾是 CRC-16/CCITT，涵蓋 `$` 與 `*` 之間的內容。CRC 不對的行一律丟棄
+- 電壓、電流一律是 0.01 單位的整數（`4820` = 48.20 V）
+
+| 方向 | 訊息 | 說明 |
+| :--- | :--- | :--- |
+| TES → PSU | `$HELO,<版本>` | 詢問節點能力，PSU 回 `$CAP` |
+| PSU → TES | `$CAP,<版本>,<類型>,<能力>,<Vmax>,<Imax>,<韌體>` | 開機時與收到 `$HELO` 時送出 |
+| PSU → TES | `$ST,<序號>,<V>,<I>,<模式>,<旗標>` | 狀態回報：輸出中每 100 ms、待機每 1 s（同時是心跳） |
+| TES → PSU | `$SET,<序號>,<V>,<I>` | 設定電壓／電流；某一欄留空表示不變 |
+| PSU → TES | `$ACK,<序號>,<結果>` | `0` 已套用、`1` 超出範圍（整筆不套用） |
+
+**範例：** `$ST,7,4820,1050,0,07*BCE9` = 48.20 V、10.50 A、模式未知（聯明不回報 CV/CC）、輸出中、電壓與電流量測有效。
+
+幾個刻意的設計：
+
+- 輸出電壓低於 1 V 時，`$ST` 的電壓／電流標為**無效**，TES 端會改用自己的 ADC 量測。
+- 聯明的 CAN 協定不回報 CV／CC 狀態，所以本專案**不宣告**「會回報模式」這項能力，
+  模式欄位只區分「關閉」與「未知」，不用設定值去猜。
+- 本專案宣告的節點類型是「可控整流模組」。同一個協定也涵蓋「只量測不控制」的節點
+  （搭配沒有數位通訊的旋鈕電源），TES 端依 `$CAP` 宣告的能力決定要不要送 `$SET`。
+
+---
+
+### 2. 文字指令（手動操作）
 
 **硬體**：UART2，GPIO 16 (RX) / 17 (TX)，Baud Rate **115200**，8N1
+
+在序列埠終端機直接輸入，以 `
+` 結尾。回應也是文字，TES 控制板不會理會。
 
 #### 控制指令
 
@@ -113,19 +157,11 @@ components/
 | :--- | :--- | :--- |
 | `ON` | 開啟輸出（含軟啟動） | `CMD_ACK:ON` |
 | `OFF` | 關閉輸出 | `CMD_ACK:OFF` |
-| `SET:V=<value>` | 設定目標電壓（`0 ~ 120.0` V） | `CMD_ACK:SET_V:<value>` |
-| `SET:I=<value>` | 設定目標電流（`0 ~ 100.0` A） | `CMD_ACK:SET_I:<value>` |
+| `SET:V=<value>` | 設定目標電壓（`0 ~ 120.0` V），手動測試用 | `CMD_ACK:SET_V:<value>` |
+| `SET:I=<value>` | 設定目標電流（`0 ~ 100.0` A），手動測試用 | `CMD_ACK:SET_I:<value>` |
 | `GET:AC` | 查詢 AC 輸入電壓 | `CMD_ACK:QUERY_AC`，非同步回傳 `AC=xxx.x` |
 | `EQ:ON` | 啟用多模組 CAN 均流（廣播） | `CMD_ACK:EQ_ON` |
 | `EQ:OFF` | 停用多模組 CAN 均流（廣播） | `CMD_ACK:EQ_OFF` |
-
-#### 自動回報 (Telemetry)
-
-| 條件 | 格式 | 週期 |
-| :--- | :--- | :--- |
-| 輸出電壓 ≥ 1V（運作中） | `V=xx.x,I=xx.x` | 每 100 ms |
-| 輸出電壓 < 1V（待機） | `HB` | 每 1000 ms |
-| AC 查詢結果（非同步） | `AC=xxx.x` | 收到 CAN 回應時 |
 
 #### 錯誤回應
 
@@ -146,30 +182,11 @@ components/
 
 ---
 
-### 2. ESP-NOW 無線傳輸
+### 3. ESP-NOW 無線傳輸
 
-ESP-NOW 是 Espressif 的點對點 2.4GHz 無線協議，**不需要 Router**，延遲低於 1ms。啟用後，上述所有 UART 控制指令均可透過 ESP-NOW 傳送，TES（遠端控制端）也會以相同格式收到 Telemetry 回報。
-
-#### 資料幀格式
-
-ESP-NOW payload 為純 ASCII 字串（與 UART 指令完全相同格式）：
-
-```
-[指令字串]\n
-```
-
-**範例：**
-
-| 方向 | Payload（ASCII） | 說明 |
-| :--- | :--- | :--- |
-| TES → PSU | `ON\n` | 開啟輸出 |
-| TES → PSU | `SET:V=48.0\n` | 設定電壓 48V |
-| TES → PSU | `SET:I=60.0\n` | 設定電流 60A |
-| TES → PSU | `OFF\n` | 關閉輸出 |
-| PSU → TES | `V=48.2,I=59.8\n` | 每 100ms 自動回報 |
-| PSU → TES | `HB\n` | 待機心跳（每 1s） |
-| PSU → TES | `AC=220.3\n` | AC 電壓查詢結果 |
-| PSU → TES | `CMD_ACK:ON\n` | 指令確認 |
+ESP-NOW 是 Espressif 的點對點 2.4GHz 無線協議，**不需要 Router**，延遲低於 1ms。
+啟用後，指令埠上的內容（連線協定與文字指令）改由 ESP-NOW 收送，格式完全相同，
+一個封包帶一行。
 
 > **頻道**：PSU Controller 的 WiFi AP 固定在 **Channel 1**，TES 裝置需在同一頻道。
 
@@ -231,7 +248,7 @@ A1 --  [PR]   ← 待機，配對進行中
 
 ---
 
-### 3. Web API
+### 4. Web API
 
 WiFi AP：SSID `PSU-Controller`，密碼 `psu12345`，IP `192.168.4.1`
 

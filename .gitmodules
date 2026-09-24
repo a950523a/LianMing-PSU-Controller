@@ -1,0 +1,3 @@
+[submodule "components/psu_link"]
+	path = components/psu_link
+	url = https://github.com/a950523a/PSU-Link

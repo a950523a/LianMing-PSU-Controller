@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectifier PSU modules (e.g., LM48-6000AL, LM100-6000AL). Built with ESP-IDF v5.5.1+ (not Arduino). Licensed CC BY-NC-SA 4.0 (non-commercial).
+ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectifier PSU modules (e.g., LM48-6000AL, LM100-6000AL). Built with ESP-IDF v5.5.5 (not Arduino). Licensed CC BY-NC-SA 4.0 (non-commercial).
 
 Current version: **v1.3.1** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
 
 ## Build Commands
 
-Requires ESP-IDF v5.5.1+ toolchain (`idf.py` on PATH).
+Requires ESP-IDF **v5.5.5** (`idf.py` on PATH) — the same version as the TES charging controller, on purpose: both ends of the link are built and debugged together, so bump both or neither. Local checkout: `C:\Users\user\esp\v5.5.5\esp-idf`. After switching IDF versions delete `build/` — the CMake cache pins the old toolchain path.
 
 ```bash
 # Configure target (first time only)
@@ -105,7 +105,25 @@ Buttons are active-low. OLED I2C address is 0x3C. Debug output is on UART0 (USB)
 
 ### CAN / UART Protocol
 
-UART2 commands (115200 baud). The same command strings are used over ESP-NOW (see below).
+The command port (UART2 at 115200, or ESP-NOW — same bytes either way) carries two
+things, told apart by the first character of each line:
+
+- **`$…` — the link protocol with the TES charging controller.** Defined in the
+  `components/psu_link` submodule ([PSU-Link](https://github.com/a950523a/PSU-Link),
+  `psu_link/psu_link.h`) — the TES firmware uses the same submodule, so never change the
+  wire format here; change it in PSU-Link and bump the submodule pointer in both repos.
+  Fresh clone: `git submodule update --init`. `SerialCmd` answers `$HELO`
+  with `$CAP`, applies `$SET` and answers `$ACK`, and sends `$ST` every 100 ms while
+  outputting / every 1 s idle (that is also the heartbeat). Every line ends in a CRC-16;
+  bad lines are dropped.
+- **Anything else — human text commands** (table below). Replies are text, which the TES
+  controller ignores, so a terminal and the TES board can share the port.
+
+Two deliberate choices in `serial_cmd.cpp`: below 1 V output the `$ST` voltage/current
+are flagged invalid (the TES side then uses its own ADC — same boundary as the old
+`V=`/`HB` split), and the node does **not** declare `PSU_CAP_REPORT_MODE`, because the
+LianMing CAN protocol does not report CV/CC and guessing it from setpoints would feed the
+controller wrong information.
 
 | Command | Description |
 |---|---|
@@ -120,7 +138,7 @@ UART2 commands (115200 baud). The same command strings are used over ESP-NOW (se
 | `STATUS:TRANSPORT` | Query current transport mode → `TRANSPORT=0` or `TRANSPORT=1` |
 | `STATUS:PAIR` | Query pairing state → `PAIRED=1,PAIRING=0` |
 
-Telemetry: `V=xx.x,I=xx.x` every 100 ms when outputting; `HB` every 1000 ms when on standby.  
+`SET:V=` / `SET:I=` remain for manual testing from a terminal; the TES controller uses `$SET`.  
 Invalid range or non-numeric input replies: `ERR:V_OUT_OF_RANGE` / `ERR:I_OUT_OF_RANGE`
 
 CAN Bus follows the LianMing rectifier module protocol (proprietary framing in `psu_protocol.cpp`).  
@@ -142,7 +160,7 @@ The controller supports switching between UART and ESP-NOW as the command transp
 - `[E?]` — ESP-NOW, no TES MAC yet
 - `[PR]` — pairing window open
 
-**ESP-NOW send callback** (`espnow_send_cb`): uses the v5.5.1 signature `(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)` — destination MAC is in `tx_info->des_addr`. This is a breaking API change from older ESP-IDF versions.
+**ESP-NOW send callback** (`espnow_send_cb`): uses the ESP-IDF v5.5 signature `(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)` — destination MAC is in `tx_info->des_addr`. This is a breaking API change from older ESP-IDF versions.
 
 ### HAL Interface — Transport Methods
 
@@ -182,7 +200,7 @@ Both serial commands and UI button increments are clamped to these limits.
 
 Two supported setups:
 1. **Dev Container** — `.devcontainer/devcontainer.json` provisions a Docker image with ESP-IDF v5.x at `/opt/esp/idf`. Requires Docker + VS Code Dev Containers extension.
-2. **Local** — Install ESP-IDF v5.5.1+ manually; VS Code with ESP-IDF extension recommended. IntelliSense is configured via `.clangd` and `.vscode/c_cpp_properties.json`.
+2. **Local** — Install ESP-IDF v5.5.5 manually; VS Code with ESP-IDF extension recommended. IntelliSense is configured via `.clangd` and `.vscode/c_cpp_properties.json`.
 
 `sdkconfig` is committed and tracks the ESP-IDF SDK configuration. Run `idf.py menuconfig` to change it interactively; avoid hand-editing.
 
