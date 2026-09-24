@@ -431,7 +431,9 @@ private:
             .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
             .rx_flow_ctrl_thresh = 122,
             .source_clk = UART_SCLK_DEFAULT,
-            .flags = { .backup_before_sleep = 0 },
+            // allow_pd = 0：睡眠時 UART 的電源域要保持供電。backup_before_sleep 是它已棄用的別名，
+            // 只指定別名會讓 C++ 對「沒初始化到 allow_pd」發出警告；空的 {} 兩個都歸零，意思不變。
+            .flags = {},
         };
         uart_driver_install(CMD_UART_PORT, 1024, 0, 0, NULL, 0);
         uart_param_config(CMD_UART_PORT, &uart_config);

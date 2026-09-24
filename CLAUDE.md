@@ -44,10 +44,12 @@ case). ESP-IDF looks for `CMakeLists.txt`; it only built because Windows file na
 case-insensitive, and would have broken on Linux (e.g. CI). If you ever rename one of
 these on Windows, go through a temporary name — a case-only `git mv` is a no-op there.
 
-**Known, not fixed:**
-- `hal_impl.cpp:435` warns about a missing `allow_pd` initializer in the `uart_config_t`
-  built at line 426 (`-Wmissing-field-initializers`). Harmless; name the field or
-  zero-initialise the struct to silence it.
+Also fixed the same day: `initUart()` in `hal_impl.cpp` set `.flags = {
+.backup_before_sleep = 0 }`. That field is the **deprecated alias** of `allow_pd`, and in
+C++ a designated initializer that skips a member (`allow_pd`) triggers
+`-Wmissing-field-initializers`. Both default to 0 either way, so behaviour never changed;
+it is now `.flags = {}`. The build is warning-free — keep it that way, so a new warning
+stands out.
 
 ## Build Commands
 
