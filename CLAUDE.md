@@ -267,6 +267,31 @@ To change a setting: `idf.py menuconfig`, then `idf.py save-defconfig` to see th
 
 `main/main.cpp` uses FreeRTOS (`vTaskDelay`) and `app_main()` — this is expected as the platform entry point. FreeRTOS API is identical on STM32, so porting only requires a new `components/port_stm32/hal_impl.cpp`.
 
+### Why C++, and why it stays
+
+Checked against the history, not assumed: the first upload (2026-01-07) was a
+**PlatformIO / Arduino** project — `platformio.ini`, `lib/PowerProtocol/`,
+`lib/SerialCmd/`, `lib/UserInterface/` — and Arduino is C++, so the code was written as
+classes. The move to ESP-IDF (`V1_Beta`, 2026-01-28) kept those classes and added
+`IHardwareHAL`, a C++ interface with virtual methods, so that `core_logic/` never touches
+ESP-IDF and a port is one more `hal_impl.cpp`.
+
+The TES charging controller went the other way in its V3 rewrite: pure C99 with a state
+machine that never calls hardware — `tes_sm_tick(sm, &inputs, &outputs)`, with the caller
+assembling the inputs and executing the outputs. Compared 2026-09-24 (the TES controller's
+CLAUDE.md, **Guiding Principle**, has the full table): that style wins on testability and
+on seeing every hardware action in one place, and costs boilerplate; the interface style
+here is simpler to write and suits I/O-heavy code.
+
+**Decision: do not rewrite this in C.** This firmware is mostly a translator — link
+protocol in, LianMing CAN out — with little decision logic, so the interface style fits
+and a rewrite would buy almost nothing. **What to do instead, if decision logic grows**
+(a more complex soft-start, voltage/current safety limits, the measurement-node mode):
+pull *that part* out as a pure function in the `tes_sm_tick` shape — state and inputs in,
+desired outputs back, no HAL calls — and leave the I/O behind `IHardwareHAL`. Both
+styles can live in one project. PSU-Link is the example of a third kind: pure C codec
+functions with no I/O at all, used here from C++ through its `extern "C"` header.
+
 ## Protocol Notes (Verified against docs/)
 
 - `ID_CMD_SET == ID_CMD_QUERY == 0x1907C080` is **intentional** — CMD=0/1/2 share the same CAN ID, distinguished by `data[0]`. Confirmed against PDF examples.
