@@ -8,6 +8,46 @@ ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectif
 
 Current version: **v1.3.1** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
 
+## Current Status (2026-09-24)
+
+**Hardware is still a perfboard prototype** on a NodeMCU-32S — no custom PCB yet.
+
+**Link protocol v2 — built, not hardware-tested.** `SerialCmd` speaks the PSU-Link
+protocol (`components/psu_link` submodule, see **CAN / UART Protocol** below). Both this
+firmware and the TES controller's build under IDF 5.5.5, but no frame has crossed a real
+wire yet. The TES side is on its `dev` branch only, waiting for the same test. What to
+check: `$CAP` arrives at the TES side on boot / on `$HELO`; `$ST` every 1 s idle and
+100 ms while outputting, V/I matching the OLED; `$SET` answered by `$ACK,<seq>,0` and the
+output really changing; all of it again over ESP-NOW.
+
+**First flash after 2026-09-24 needs a full erase.** Builds now use the OTA partition
+table (`sdkconfig.defaults`, see **Development Environment**); a board that was flashed
+with the old single-app table must get `idf.py erase-flash` once. That also clears NVS,
+so the transport setting and ESP-NOW pairing have to be redone — do it together with the
+protocol test above.
+
+**Flash size is unknown.** The config assumes 2 MB, which is safe either way: a 2 MB
+layout runs on a 4 MB chip, not the other way round. NodeMCU-32S modules normally carry
+4 MB, but that is not verified — `python -m esptool flash_id` with the board on USB
+prints "Detected flash size". If it is 4 MB, raise `CONFIG_ESPTOOLPY_FLASHSIZE_*` in
+`sdkconfig.defaults` and grow `ota_0` / `ota_1` to `0x1E0000` each; OTA headroom is only
+about 7 % today (app 0xDFC00 / slot 0xF0000).
+
+**Possible future role, not decided:** the protocol also covers a *measurement-only*
+node — for power supplies with no digital interface — which reports V/I and accepts no
+setpoints. If that node is built on the same ESP32 board, this firmware could gain a
+second mode rather than a second repository. See the TES controller's CLAUDE.md,
+**Current Status**, for why that node is wanted.
+
+**Known, not fixed:**
+- `components/core_logic/CmakeLists.txt` — wrong case. ESP-IDF looks for
+  `CMakeLists.txt`; it works only because Windows file names are case-insensitive. It
+  will break the moment this builds on Linux (e.g. CI). Fix with a two-step `git mv`
+  (via a temporary name), since a case-only rename is a no-op on Windows.
+- `hal_impl.cpp:435` warns about a missing `allow_pd` initializer in the `uart_config_t`
+  built at line 426 (`-Wmissing-field-initializers`). Harmless; name the field or
+  zero-initialise the struct to silence it.
+
 ## Build Commands
 
 Requires ESP-IDF **v5.5.5** (`idf.py` on PATH) — the same version as the TES charging controller, on purpose: both ends of the link are built and debugged together, so bump both or neither. Local checkout: `C:\Users\user\esp\v5.5.5\esp-idf`. After switching IDF versions delete `build/` — the CMake cache pins the old toolchain path.
