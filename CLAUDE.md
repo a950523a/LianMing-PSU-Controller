@@ -39,11 +39,12 @@ setpoints. If that node is built on the same ESP32 board, this firmware could ga
 second mode rather than a second repository. See the TES controller's CLAUDE.md,
 **Current Status**, for why that node is wanted.
 
+**Fixed 2026-09-24:** `core_logic/` and `port_esp32/` had `CmakeLists.txt` (wrong
+case). ESP-IDF looks for `CMakeLists.txt`; it only built because Windows file names are
+case-insensitive, and would have broken on Linux (e.g. CI). If you ever rename one of
+these on Windows, go through a temporary name — a case-only `git mv` is a no-op there.
+
 **Known, not fixed:**
-- `components/core_logic/CmakeLists.txt` — wrong case. ESP-IDF looks for
-  `CMakeLists.txt`; it works only because Windows file names are case-insensitive. It
-  will break the moment this builds on Linux (e.g. CI). Fix with a two-step `git mv`
-  (via a temporary name), since a case-only rename is a no-op on Windows.
 - `hal_impl.cpp:435` warns about a missing `allow_pd` initializer in the `uart_config_t`
   built at line 426 (`-Wmissing-field-initializers`). Harmless; name the field or
   zero-initialise the struct to silence it.
