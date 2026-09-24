@@ -1,0 +1,27 @@
+# Project configuration that must be the same on every machine.
+#
+# sdkconfig itself is gitignored (it is regenerated per machine / IDF version), so
+# anything that is not an ESP-IDF default has to live here — otherwise a fresh clone
+# silently builds with defaults. That is exactly what happened to the partition table:
+# partitions.csv was committed, but "use a custom partition table" was only ever set
+# in a local sdkconfig, so builds used the single-app table and web OTA answered
+# "No OTA partition". Regenerate the non-default list with `idf.py save-defconfig`
+# and merge, rather than hand-editing sdkconfig.
+#
+# ESP-IDF 5.5.5
+
+# ── Partition table: two OTA slots (web OTA needs them) ─────────────────────────
+# partitions.csv: nvs 16K, otadata 8K, ota_0 / ota_1 0xF0000 (960K) each.
+# Switching an existing board from the single-app table needs one full erase:
+#   idf.py erase-flash && idf.py flash
+# NVS moves with it, so the transport setting and the ESP-NOW pairing are lost —
+# re-pair afterwards.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# partitions.csv ends at 0x1F0000, so it fits in 2 MB. Stated explicitly because the
+# OTA slot size is derived from it — raise both together if the board has more flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_2MB=y
+
+# ── Carried over from the previous local sdkconfig (idf.py save-defconfig) ──────
+CONFIG_PM_SLEEP_FUNC_IN_IRAM=y

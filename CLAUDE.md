@@ -202,7 +202,11 @@ Two supported setups:
 1. **Dev Container** — `.devcontainer/devcontainer.json` provisions a Docker image with ESP-IDF v5.x at `/opt/esp/idf`. Requires Docker + VS Code Dev Containers extension.
 2. **Local** — Install ESP-IDF v5.5.5 manually; VS Code with ESP-IDF extension recommended. IntelliSense is configured via `.clangd` and `.vscode/c_cpp_properties.json`.
 
-`sdkconfig` is committed and tracks the ESP-IDF SDK configuration. Run `idf.py menuconfig` to change it interactively; avoid hand-editing.
+`sdkconfig` is **not** committed — it is gitignored and regenerated per machine. Anything that is not an ESP-IDF default must go in **`sdkconfig.defaults`** (committed), or a fresh clone silently builds with defaults. That is how the partition table went wrong until 2026-09-24: `partitions.csv` was committed, but "custom partition table" only ever lived in a local `sdkconfig`, so every build used the single-app table and web OTA answered "No OTA partition".
+
+To change a setting: `idf.py menuconfig`, then `idf.py save-defconfig` to see the non-default list, and merge it into `sdkconfig.defaults` by hand (that command overwrites the file and drops its comments). Existing local `sdkconfig` values win over `sdkconfig.defaults` — delete the local `sdkconfig` after editing the defaults to regenerate it.
+
+**OTA headroom is tight:** the app is 0xDFC00 bytes against a 0xF0000 slot — about 7 % free on 2026-09-24. When it runs out, the fix is a bigger slot (needs a board with more than 2 MB flash; see the partition note above) or `-Os` instead of the default `-Og`, not dropping features.
 
 ## Design Conventions
 
