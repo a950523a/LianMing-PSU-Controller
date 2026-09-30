@@ -29,6 +29,7 @@ extern "C" void app_main(void) {
 
     while (1) {
         psu.loop();
+        hal->transportPoll();   // ESP-NOW：配對、握手、驗證收到的訊息 —— serial 只讀得到驗證過的
         ui.loop();
         serial.loop();
         web.processCommands();  // drain commands queued by web UI handlers

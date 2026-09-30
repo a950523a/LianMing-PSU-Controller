@@ -25,4 +25,5 @@ idf_component_register(
     # 且 main 需要同時看到這兩者
     REQUIRES 
         core_logic
+        psu_link
 )

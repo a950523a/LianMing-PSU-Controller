@@ -122,8 +122,16 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
     <span class="lbl">TES MAC</span>
     <span id="peer-mac" class="val" style="font-size:.75em">--</span>
   </div>
+  <div id="pair-box" style="display:none;text-align:center;margin:8px 0">
+    <div style="font-size:.8em;color:#aab">TES 上顯示的數字一樣嗎？</div>
+    <div id="pair-code" style="font:700 2em ui-monospace,monospace;letter-spacing:.12em;margin:4px 0"></div>
+    <div class="btns" id="pair-acts">
+      <button onclick="cmd('PAIR_YES')">數字相同，確認</button>
+      <button onclick="cmd('PAIR_NO')">不同／取消</button>
+    </div>
+  </div>
   <div class="btns">
-    <button onclick="pairCmd()" class="full">開始配對 (10s 視窗)</button>
+    <button onclick="pairCmd()" class="full">開始配對</button>
     <button onclick="setTransport(0)">切換 UART</button>
     <button onclick="setTransport(1)">切換 ESP-NOW</button>
   </div>
@@ -160,9 +168,20 @@ async function fetchStatus() {
     else                 { trB.textContent='UART';    trB.className='badge off'; }
 
     const prB = document.getElementById('pr-badge');
-    if (d.pairing)      { prB.textContent='配對中…'; prB.className='badge ss'; }
-    else if (d.paired)  { prB.textContent='已配對';  prB.className='badge on'; }
-    else                { prB.textContent='未配對';  prB.className='badge off'; }
+    const ps = d.pair_state||0;
+    if (ps===3)              { prB.textContent=d.pair_local_ok?'等 TES 確認…':'比對配對碼'; prB.className='badge ss'; }
+    else if (d.pairing)      { prB.textContent='配對中…'; prB.className='badge ss'; }
+    else if (d.needs_repair) { prB.textContent='需重新配對'; prB.className='badge off'; }
+    else if (d.paired)       { prB.textContent=d.link_auth?'已配對・已驗證':'已配對'; prB.className='badge on'; }
+    else                     { prB.textContent='未配對';  prB.className='badge off'; }
+    // 配對碼：兩邊數字相同才在兩邊都按確認（跟藍牙一樣）
+    const pb = document.getElementById('pair-box');
+    pb.style.display = ps===3 ? 'block' : 'none';
+    if (ps===3) {
+      const c = d.pair_code||'';
+      document.getElementById('pair-code').textContent = c.slice(0,3)+' '+c.slice(3);
+      document.getElementById('pair-acts').style.display = d.pair_local_ok ? 'none' : 'flex';
+    }
 
     document.getElementById('peer-mac').textContent = d.peer_mac || '--';
   } catch(e) {}
@@ -262,6 +281,19 @@ static esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddBoolToObject  (root, "paired",    self->_hal->isPairedEspNow());
     cJSON_AddBoolToObject  (root, "pairing",   self->_hal->isPairingActive());
     cJSON_AddStringToObject(root, "peer_mac",  peer_mac[0] ? peer_mac : "--");
+    {
+        HalPairInfo pi;
+        self->_hal->getPairInfo(pi);
+        cJSON_AddNumberToObject(root, "pair_state",    pi.state);
+        cJSON_AddBoolToObject  (root, "pair_local_ok", pi.localOk);
+        cJSON_AddBoolToObject  (root, "link_auth",     pi.linkAuth);
+        cJSON_AddBoolToObject  (root, "needs_repair",  pi.needsRepair);
+        if (pi.state == 3 || pi.state == 4) {
+            char code[8];
+            snprintf(code, sizeof code, "%06lu", (unsigned long)(pi.code % 1000000u));
+            cJSON_AddStringToObject(root, "pair_code", code);
+        }
+    }
 
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -300,6 +332,8 @@ static esp_err_t handle_cmd(httpd_req_t* req) {
         else if (strcmp(cs, "EQ_OFF")        == 0) { wc.type = WebCmd::EQ_OFF; }
         else if (strcmp(cs, "QUERY_AC")      == 0) { wc.type = WebCmd::QUERY_AC; }
         else if (strcmp(cs, "PAIR")          == 0) { wc.type = WebCmd::PAIR; }
+        else if (strcmp(cs, "PAIR_YES")      == 0) { wc.type = WebCmd::PAIR_YES; }
+        else if (strcmp(cs, "PAIR_NO")       == 0) { wc.type = WebCmd::PAIR_NO; }
         else if (strcmp(cs, "SET_TRANSPORT") == 0) {
             wc.type = WebCmd::SET_TRANSPORT;
             cJSON* jm = cJSON_GetObjectItemCaseSensitive(root, "mode");
@@ -426,6 +460,8 @@ void WebCtrl::processCommands() {
             case WebCmd::EQ_OFF:        _psu->setEqualization(false);        break;
             case WebCmd::QUERY_AC:      _psu->queryInputVoltage();           break;
             case WebCmd::PAIR:          _hal->triggerPairing();              break;
+            case WebCmd::PAIR_YES:      _hal->pairAnswer(true);              break;
+            case WebCmd::PAIR_NO:       _hal->pairAnswer(false);             break;
             case WebCmd::SET_TRANSPORT: _hal->setTransport(wc.transport_mode); break;
             default: break;
         }

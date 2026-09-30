@@ -36,8 +36,16 @@ private:
     bool _lastDrawnPaired;
     bool _lastDrawnPairing;
 
+    // ESP-NOW 配對畫面（數字比對）：配對中蓋過一般畫面，按鈕改成確認／取消
+    HalPairInfo _pair;
+    HalPairInfo _lastDrawnPair;
+    bool        _pairScreen;
+
     void handleButtons();
     void drawScreen();
+    bool pairScreenWanted(const HalPairInfo& p);
+    void handlePairButtons();
+    void drawPairScreen();
 };
 
 #endif

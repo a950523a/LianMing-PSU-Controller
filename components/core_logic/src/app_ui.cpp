@@ -19,6 +19,79 @@ AppUI::AppUI(IHardwareHAL* hal, PowerProtocol* psu)
     _lastDrawnTransport = -1;
     _lastDrawnPaired    = false;
     _lastDrawnPairing   = false;
+    _pair          = HalPairInfo();
+    _lastDrawnPair = HalPairInfo();
+    _pairScreen    = false;
+}
+
+// 配對中，或剛結束（完成顯示 3 s、失敗 5 s）
+bool AppUI::pairScreenWanted(const HalPairInfo& p) {
+    if (p.state >= 1 && p.state <= 3) return true;
+    if (p.state == 4 && p.ageMs < 3000) return true;
+    if (p.state == 5 && p.ageMs < 5000) return true;
+    return _hal->isPairingActive();
+}
+
+// SEL = 兩邊配對碼相同；UP / DOWN = 取消。配對中這兩顆鍵不能照平常
+// 開關輸出 —— 使用者看著配對碼按鍵，結果是 PSU 開始輸出。
+void AppUI::handlePairButtons() {
+    if (_hal->getTickCount() - lastDebounce < 150) return;
+    bool s = _hal->readButton(BTN_SELECT);
+    bool u = _hal->readButton(BTN_UP);
+    bool d = _hal->readButton(BTN_DOWN);
+    if (s && !lastSel && _pair.state == 3 && !_pair.localOk) {
+        lastDebounce = _hal->getTickCount();
+        _hal->pairAnswer(true);
+    }
+    if ((u && !lastUp) || (d && !lastDown)) {
+        lastDebounce = _hal->getTickCount();
+        if (_pair.state >= 1 && _pair.state <= 3) _hal->pairAnswer(false);
+    }
+    lastSel = s; lastUp = u; lastDown = d;
+}
+
+void AppUI::drawPairScreen() {
+    char buf[32];
+    _hal->displayClear();
+    switch (_pair.state) {
+    case 3:
+        _hal->displayDrawString(0, 0, "PAIR WITH TES", 0);
+        snprintf(buf, sizeof(buf), "%03lu %03lu",
+                 (unsigned long)((_pair.code / 1000u) % 1000u), (unsigned long)(_pair.code % 1000u));
+        _hal->displayDrawString(30, 18, buf, 1);
+        if (_pair.localOk) {
+            _hal->displayDrawString(0, 42, "Waiting for TES...", 0);
+            _hal->displayDrawString(0, 54, "UP/DOWN = cancel", 0);
+        } else {
+            _hal->displayDrawString(0, 42, "Same on TES? SEL=yes", 0);
+            _hal->displayDrawString(0, 54, "UP/DOWN = no", 0);
+        }
+        break;
+    case 4:
+        _hal->displayDrawString(0, 0, "PAIRED", 1);
+        _hal->displayDrawString(0, 26, "TES linked securely", 0);
+        break;
+    case 5: {
+        const char* why = "Error";
+        switch (_pair.fail) {
+        case 1: why = "Timed out";         break;
+        case 2: why = "Cancelled";         break;
+        case 3: why = "Cancelled on TES";  break;
+        case 4: case 5: why = "Security check fail"; break;
+        }
+        _hal->displayDrawString(0, 0, "PAIRING FAILED", 0);
+        _hal->displayDrawString(0, 18, why, 0);
+        _hal->displayDrawString(0, 32, "Nothing was saved", 0);
+        break;
+    }
+    default:
+        _hal->displayDrawString(0, 0, "PAIRING...", 1);
+        _hal->displayDrawString(0, 24, _pair.state == 2 ? "TES found..." : "Waiting for TES", 0);
+        _hal->displayDrawString(0, 36, "Start pairing on TES", 0);
+        _hal->displayDrawString(0, 54, "UP/DOWN = cancel", 0);
+        break;
+    }
+    _hal->displayShow();
 }
 
 void AppUI::begin() {
@@ -26,6 +99,20 @@ void AppUI::begin() {
 }
 
 void AppUI::loop() {
+    _hal->getPairInfo(_pair);
+    if (pairScreenWanted(_pair)) {
+        handlePairButtons();
+        _hal->getPairInfo(_pair);
+        if (!_pairScreen || _pair.state != _lastDrawnPair.state || _pair.code != _lastDrawnPair.code ||
+            _pair.localOk != _lastDrawnPair.localOk) {
+            drawPairScreen();
+            _lastDrawnPair = _pair;
+        }
+        _pairScreen = true;
+        return;
+    }
+    if (_pairScreen) { _pairScreen = false; _displayDirty = true; }   // 回到一般畫面
+
     _cachedStatus    = _psu->getStatus();
     _cachedTransport = _hal->getTransport();
     _cachedPaired    = _hal->isPairedEspNow();

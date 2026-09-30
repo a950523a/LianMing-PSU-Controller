@@ -31,7 +31,7 @@ layout runs on a 4 MB chip, not the other way round. NodeMCU-32S modules normall
 4 MB, but that is not verified — `python -m esptool flash_id` with the board on USB
 prints "Detected flash size". If it is 4 MB, raise `CONFIG_ESPTOOLPY_FLASHSIZE_*` in
 `sdkconfig.defaults` and grow `ota_0` / `ota_1` to `0x1E0000` each; OTA headroom is only
-about 7 % today (app 0xDFC00 / slot 0xF0000).
+about 6 % today (app 0xE26F0 / slot 0xF0000).
 
 **Possible future role, not decided:** the protocol also covers a *measurement-only*
 node — for power supplies with no digital interface — which reports V/I and accepts no
@@ -115,7 +115,7 @@ main/main.cpp
 - REST API: `GET /api/status` → JSON, `POST /api/cmd` → JSON command, `POST /api/ota` → raw `.bin` OTA upload
 - WiFi AP: SSID `PSU-Controller`, password `psu12345`, URL `http://192.168.4.1`
 - OTA: uploads to the next OTA partition, sets it as boot, then restarts. Requires `partitions.csv` (dual OTA layout)
-- WebCmd types: `ON`, `OFF`, `SET_VI`, `EQ_ON`, `EQ_OFF`, `QUERY_AC`, `PAIR`, `SET_TRANSPORT`
+- WebCmd types: `ON`, `OFF`, `SET_VI`, `EQ_ON`, `EQ_OFF`, `QUERY_AC`, `PAIR`, `SET_TRANSPORT`, `PAIR_YES`, `PAIR_NO` (answer to the pairing code)
 
 **`components/core_logic/`** — Pure C++ business logic, **zero ESP-IDF dependencies**. Portable and hardware-agnostic.
 - `include/hal_interface.h` — `IHardwareHAL` abstract base class; all hardware access goes through this interface
@@ -175,7 +175,7 @@ controller wrong information.
 | `ON` / `OFF` | Power on/off with soft-start |
 | `GET:AC` | Query AC input voltage (replies `AC=xxx.x`) |
 | `EQ:ON` / `EQ:OFF` | Enable/disable multi-module CAN equalization (broadcast) |
-| `PAIR` | Open ESP-NOW pairing window (10 s) |
+| `PAIR` | Start ESP-NOW pairing (numeric comparison — confirm the code on both devices) |
 | `SET:TRANSPORT=0` | Switch to UART mode (persisted in NVS) |
 | `SET:TRANSPORT=1` | Switch to ESP-NOW mode (persisted in NVS) |
 | `STATUS:TRANSPORT` | Query current transport mode → `TRANSPORT=0` or `TRANSPORT=1` |
@@ -189,19 +189,25 @@ Official protocol spec: `docs/联明电源数字电源模块CAN通讯协议V2.0 
 
 ### ESP-NOW Transport
 
-The controller supports switching between UART and ESP-NOW as the command transport. The ESP-NOW payload format is **identical to UART** — plain ASCII strings terminated with `\n`. Transport mode and paired TES MAC are persisted in NVS and restored on boot.
+The controller supports switching between UART and ESP-NOW as the command transport. Over UART the bytes are plain lines, as before. **Over ESP-NOW every line is authenticated** (2026-09-30, not hardware-tested) — the pairing and link authentication live in the PSU-Link submodule (`psu_pair`, `psu_sess`) and are shared with the TES controller. Transport mode, the paired TES MAC and its 32-byte long-term key (`tes_mac`, `tes_ltk` in NVS namespace `psu_cfg`) persist across reboots.
 
-**Pairing flow** (broadcast handshake):
-1. Trigger with `PAIR\n` (UART) or web UI button.
-2. PSU broadcasts `PSU_HELLO\n` to `FF:FF:FF:FF:FF:FF` every 500 ms for 10 s.
-3. TES receives the broadcast, records PSU MAC, and sends back any packet.
-4. PSU receives the reply, records TES MAC, saves to NVS — pairing complete.
+**Why:** before this, `espnow_recv_cb` pushed every received byte into SerialCmd's buffer — no source check, no authentication — and SerialCmd also accepts the human text commands (`ON`, `OFF`, `SET:V=…`). Any ESP32 in radio range could switch this PSU on or change its output. ESP-NOW's own encryption would not have fixed it: unencrypted frames are still delivered and the callback cannot tell them apart.
+
+**How it works now:** the receive callback only queues datagrams. `transportPoll()` (main loop, before `serial.loop()`) splits them into lines: a line from the paired TES with a valid counter + HMAC tag goes to SerialCmd; pairing and handshake messages (which carry no tag by nature) go to `psu_pair` / `psu_sess`; everything else is dropped and counted. `uartSend()` tags every outgoing line and sends nothing until the connection handshake is done — so the boot-time `$CAP` is not heard over ESP-NOW; TES asks with `$HELO` once linked. Everything runs in the main task, so no locks.
+
+**Pairing flow** (numeric comparison, like Bluetooth):
+1. Start pairing on both devices — here with the `PAIR` command (UART) or the web page's button; on TES from `/control`.
+2. This PSU broadcasts its X25519 public key; the TES answers with its own; the PSU commits to a nonce before seeing the TES's; both derive the same **6-digit code**.
+3. The OLED shows the code (`AppUI::drawPairScreen()`), and so does the web page. **SEL = the numbers match, UP / DOWN = cancel** — while pairing, those buttons do not switch the output. Confirm on the TES as well.
+4. Only when both sides confirmed are the TES MAC and the key saved. Timeout 60 s after the code appears; a cancel on either side stores nothing.
+
+A pairing made by older firmware (MAC only, no key) is reported as `needs_repair` and cannot be used — pair again, with the TES on matching firmware. Main task stack is 8 KB for the elliptic-curve maths (`sdkconfig.defaults`).
 
 **OLED first-line transport indicators** (right-side bracket):
 - `[UA]` — UART mode
 - `[EN]` — ESP-NOW, paired
 - `[E?]` — ESP-NOW, no TES MAC yet
-- `[PR]` — pairing window open
+- `[PR]` — pairing window open (during pairing the whole screen switches to the pairing screen)
 
 **ESP-NOW send callback** (`espnow_send_cb`): uses the ESP-IDF v5.5 signature `(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)` — destination MAC is in `tx_info->des_addr`. This is a breaking API change from older ESP-IDF versions.
 
@@ -229,7 +235,7 @@ Defined in `hal_interface.h` with no-op defaults so `core_logic/` stays portable
 | `pairing` | bool | Pairing window is open |
 | `peer_mac` | string | TES MAC address (`"--"` if unpaired) |
 
-`POST /api/cmd` accepts `{"cmd":"PAIR"}` and `{"cmd":"SET_TRANSPORT","mode":0}`.
+`POST /api/cmd` accepts `{"cmd":"PAIR"}`, `{"cmd":"PAIR_YES"}` / `{"cmd":"PAIR_NO"}` and `{"cmd":"SET_TRANSPORT","mode":0}`.
 
 ### Safety Limits
 
@@ -249,7 +255,7 @@ Two supported setups:
 
 To change a setting: `idf.py menuconfig`, then `idf.py save-defconfig` to see the non-default list, and merge it into `sdkconfig.defaults` by hand (that command overwrites the file and drops its comments). Existing local `sdkconfig` values win over `sdkconfig.defaults` — delete the local `sdkconfig` after editing the defaults to regenerate it.
 
-**OTA headroom is tight:** the app is 0xDFC00 bytes against a 0xF0000 slot — about 7 % free on 2026-09-24. When it runs out, the fix is a bigger slot (needs a board with more than 2 MB flash; see the partition note above) or `-Os` instead of the default `-Og`, not dropping features.
+**OTA headroom is tight:** the app is 0xE26F0 bytes against a 0xF0000 slot — about 6 % free on 2026-09-30 (0xDFC00, 7 %, before ESP-NOW pairing added +11 KB; most of mbedTLS was already linked for WPA). When it runs out, the fix is a bigger slot (needs a board with more than 2 MB flash; see the partition note above) or `-Os` instead of the default `-Og`, not dropping features.
 
 ## Design Conventions
 

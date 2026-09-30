@@ -25,3 +25,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_2MB=y
 
 # ── Carried over from the previous local sdkconfig (idf.py save-defconfig) ──────
 CONFIG_PM_SLEEP_FUNC_IN_IRAM=y
+
+# ── Main task stack: ESP-NOW pairing runs X25519 (mbedTLS ECP) in the main loop ──
+# The ESP-IDF default of 3584 bytes is not enough for the elliptic-curve maths.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

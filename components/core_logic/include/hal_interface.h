@@ -19,6 +19,18 @@ enum HalButton {
     BTN_DOWN
 };
 
+// ESP-NOW 配對進度（數字比對，見 psu_link/psu_pair.h），給 OLED 與網頁顯示
+struct HalPairInfo {
+    uint8_t  state;        // psu_pair_state_t：0 閒置、1 搜尋、2 交換金鑰、3 比對配對碼、4 完成、5 失敗
+    uint8_t  fail;         // psu_pair_fail_t
+    uint32_t code;         // state 3 / 4 時有效，顯示成 6 位數
+    bool     localOk;      // 這邊已按確認
+    bool     peerOk;       // TES 那邊已按確認
+    uint32_t ageMs;        // 進入目前狀態多久
+    bool     linkAuth;     // 跟配對的 TES 已完成握手，訊息驗證中
+    bool     needsRepair;  // 只有舊版配對（MAC、沒有金鑰）—— 要重新配對
+};
+
 // HAL 介面定義
 class IHardwareHAL {
 public:
@@ -54,6 +66,13 @@ public:
     virtual int  getTransport() { return 0; }
     virtual bool isPairedEspNow() { return false; }
     virtual void getEspNowPeerMac(char* buf, size_t len) { if (len > 0) buf[0] = '\0'; }
+
+    // 無線傳輸的收尾工作（配對、握手、驗證收到的訊息）。主迴圈每輪呼叫一次，
+    // 在 SerialCmd::loop() 之前 —— uartRead() 只會讀到驗證通過的行。
+    virtual void transportPoll() {}
+    virtual void getPairInfo(HalPairInfo& info) { info = HalPairInfo(); }
+    // 使用者對配對碼的回應：accept = 兩邊數字相同；配對碼出來前傳 false = 取消
+    virtual void pairAnswer(bool accept) { (void)accept; }
 };
 
 #endif // HAL_INTERFACE_H
