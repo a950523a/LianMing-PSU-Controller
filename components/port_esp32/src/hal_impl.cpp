@@ -125,6 +125,27 @@ static uint32_t   s_pair_state_ms   = 0;
 static uint32_t   s_auth_rejects    = 0;
 #define PAIR_LINGER_MS 3000u   // 配對結束後再處理 3 s：TES 可能還在等最後一則確認
 
+// ── 頻道（2026-10-14）────────────────────────────────────────────────────────
+// ESP-NOW 只收得到同一個頻道上的封包。TES 連著家裡路由器時只能待在路由器的頻道，
+// 這裡的 AP 卻寫死在 1 —— 頻道不同就永遠配不起來、也連不上（實測兩邊都「配對逾時」）。
+// 所以由節點去找 TES：
+//   配對搜尋中：每 PAIR_HOP_MS 換一個頻道（1→13 輪流），TES 一回應（離開 SEARCHING）就停
+//   配對成功：把當時的頻道存進 NVS（tes_ch），開機就用它
+//   連線中：送給 TES 的單播連續 LINK_FAIL_LIMIT 次沒 ACK（路由器換頻道、TES 重開到別的頻道）
+//           → 重新握手；握手 LINK_SCAN_AFTER_MS 內沒成功就每 LINK_HOP_MS 換頻道找
+// 換頻道會讓連在這台 AP 上的手機短暫斷線 —— 只在配對或找不到 TES 時才會換。
+#define CH_MIN              1
+#define CH_MAX              13
+#define PAIR_HOP_MS         600u    // > PSU_PAIR_RESEND_MS（500）：每個頻道至少廣播一次
+#define LINK_HOP_MS         1200u   // > PSU_SESS_RESEND_MS（1000）：每個頻道至少送一次 SHR
+#define LINK_SCAN_AFTER_MS  5000u
+#define LINK_FAIL_LIMIT     5u
+static uint8_t           s_chan           = 1;    // 目前的頻道
+static uint8_t           s_chan_saved     = 0;    // NVS 裡的頻道（0 = 沒存過）
+static uint32_t          s_hop_ms         = 0;
+static uint32_t          s_link_ok_ms     = 0;    // 最後一次確認連線正常
+static volatile uint32_t s_tx_fail_streak = 0;    // 連續沒有 ACK 的單播（send 回呼更新）
+
 static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 static uint32_t ms_now() { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -150,6 +171,11 @@ static void nvs_load_config() {
     uint8_t ltk[32];
     size_t klen = sizeof ltk;
     bool have_ltk = nvs_get_blob(h, "tes_ltk", ltk, &klen) == ESP_OK && klen == sizeof ltk;
+    uint8_t ch = 0;
+    if (nvs_get_u8(h, "tes_ch", &ch) == ESP_OK && ch >= CH_MIN && ch <= CH_MAX) {
+        s_chan_saved = ch;
+        s_chan       = ch;
+    }
     nvs_close(h);
 
     if (have_mac && have_ltk) {
@@ -162,6 +188,37 @@ static void nvs_load_config() {
         printf("ESP-NOW: stored pairing predates link authentication - pair again\n");
     }
     memset(ltk, 0, sizeof ltk);
+}
+
+static void nvs_save_channel(uint8_t ch) {
+    nvs_handle_t h;
+    if (nvs_open("psu_cfg", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "tes_ch", ch);
+    nvs_commit(h);
+    nvs_close(h);
+    s_chan_saved = ch;
+    printf("ESP-NOW: TES is on channel %u (saved)\n", (unsigned)ch);
+}
+
+// 連線斷掉後重新握手：從 NVS 重新讀長期金鑰（RAM 裡不另外留一份）
+static bool sess_restart() {
+    nvs_handle_t h;
+    if (nvs_open("psu_cfg", NVS_READONLY, &h) != ESP_OK) return false;
+    uint8_t ltk[32];
+    size_t klen = sizeof ltk;
+    bool ok = nvs_get_blob(h, "tes_ltk", ltk, &klen) == ESP_OK && klen == sizeof ltk;
+    nvs_close(h);
+    if (ok) psu_sess_init(&s_sess, PSU_ROLE_NODE, ltk, psu_crypto_mbedtls(), ms_now());
+    memset(ltk, 0, sizeof ltk);
+    return ok;
+}
+
+static void set_channel(uint8_t ch) {
+    if (esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE) == ESP_OK) s_chan = ch;
+}
+
+static void hop_channel() {
+    set_channel(s_chan >= CH_MAX ? (uint8_t)CH_MIN : (uint8_t)(s_chan + 1));
 }
 
 static void nvs_save_transport(int mode) {
@@ -227,6 +284,10 @@ static void espnow_add_peer(const uint8_t *mac) {
 
 static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
     s_espnow_send_ok = (status == ESP_NOW_SEND_SUCCESS);
+    // 廣播沒有 ACK，只算單播
+    static const uint8_t bc[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    if (memcmp(tx_info->des_addr, bc, 6) != 0)
+        s_tx_fail_streak = s_espnow_send_ok ? 0 : s_tx_fail_streak + 1;
     if (!s_espnow_send_ok) {
         printf("ESP-NOW: TX to " MACSTR " failed\n", MAC2STR(tx_info->des_addr));
     }
@@ -300,8 +361,32 @@ static void pair_apply() {
     psu_sess_init(&s_sess, PSU_ROLE_NODE, s_pair.ltk, psu_crypto_mbedtls(), ms_now());
     s_sess_on = true;
     nvs_save_pairing(s_tes_mac, s_pair.ltk);
-    printf("ESP-NOW: paired (code %06lu), TES=" MACSTR "\n",
-           (unsigned long)s_pair.code, MAC2STR(s_tes_mac));
+    if (s_chan != s_chan_saved) nvs_save_channel(s_chan);
+    s_link_ok_ms = ms_now();
+    printf("ESP-NOW: paired (code %06lu), TES=" MACSTR " on channel %u\n",
+           (unsigned long)s_pair.code, MAC2STR(s_tes_mac), (unsigned)s_chan);
+}
+
+// 已配對、用 ESP-NOW：確認 TES 還在這個頻道，不在就找
+static void link_channel_poll(uint32_t now) {
+    if (s_transport != TRANSPORT_ESPNOW || !s_sess_on || s_pair_on) return;
+    if (psu_sess_ready(&s_sess)) {
+        if (s_tx_fail_streak >= LINK_FAIL_LIMIT) {
+            printf("ESP-NOW: %u sends to TES unanswered - re-handshaking\n", (unsigned)s_tx_fail_streak);
+            s_tx_fail_streak = 0;
+            sess_restart();
+            s_link_ok_ms = now;
+            return;
+        }
+        s_link_ok_ms = now;
+        if (s_chan != s_chan_saved) nvs_save_channel(s_chan);
+        return;
+    }
+    // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找
+    if (now - s_link_ok_ms >= LINK_SCAN_AFTER_MS && now - s_hop_ms >= LINK_HOP_MS) {
+        s_hop_ms = now;
+        hop_channel();
+    }
 }
 
 static void transport_poll() {
@@ -323,9 +408,15 @@ static void transport_poll() {
         esp_wifi_get_mac(WIFI_IF_STA, mac);   // ESP-NOW 從 STA 介面送出，TES 看到的就是這個
         psu_pair_start(&s_pair, PSU_ROLE_NODE, mac, psu_crypto_mbedtls(), now);
         s_pair_on = true;
-        printf("ESP-NOW: pairing started - broadcasting key\n");
+        s_hop_ms  = now;
+        printf("ESP-NOW: pairing started - broadcasting key on channels %d-%d\n", CH_MIN, CH_MAX);
     }
     if (s_pair_on) {
+        // 還在找 TES：換頻道。TES 回應之後（EXCHANGING 起）就停在這個頻道
+        if (s_pair.state == PSU_PAIR_SEARCHING && now - s_hop_ms >= PAIR_HOP_MS) {
+            s_hop_ms = now;
+            hop_channel();
+        }
         psu_msg_t m;
         bool bcast;
         while (psu_pair_poll(&s_pair, now, &m, &bcast)) send_plain(bcast ? BCAST : s_pair.peer_mac, &m);
@@ -348,6 +439,7 @@ static void transport_poll() {
         psu_msg_t m;
         while (psu_sess_poll(&s_sess, now, &m)) send_plain(s_tes_mac, &m);
     }
+    link_channel_poll(now);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -606,7 +698,7 @@ private:
         ap_cfg.ap.ssid_len       = (uint8_t)strlen(AP_SSID);
         ap_cfg.ap.max_connection = 3;
         ap_cfg.ap.authmode       = WIFI_AUTH_WPA2_PSK;
-        ap_cfg.ap.channel        = 1;
+        ap_cfg.ap.channel        = s_chan;   // 配對時存下的 TES 頻道；沒存過就是 1
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
 
         ESP_ERROR_CHECK(esp_wifi_start());

@@ -195,6 +195,16 @@ The controller supports switching between UART and ESP-NOW as the command transp
 
 **How it works now:** the receive callback only queues datagrams. `transportPoll()` (main loop, before `serial.loop()`) splits them into lines: a line from the paired TES with a valid counter + HMAC tag goes to SerialCmd; pairing and handshake messages (which carry no tag by nature) go to `psu_pair` / `psu_sess`; everything else is dropped and counted. `uartSend()` tags every outgoing line and sends nothing until the connection handshake is done — so the boot-time `$CAP` is not heard over ESP-NOW; TES asks with `$HELO` once linked. Everything runs in the main task, so no locks.
 
+**Channel search (2026-10-14).** ESP-NOW only hears frames on its own channel. A TES connected
+to a home router has to stay on the router's channel, while this AP was hard-coded to channel 1 —
+so pairing timed out on both sides (seen on hardware). The node now finds the TES: while pairing
+is SEARCHING it hops 1→13 every 600 ms (longer than the 500 ms key rebroadcast) and stops as soon
+as the TES answers; on success the channel is saved (NVS `tes_ch`) and the AP starts on it at boot.
+Once paired, 5 unicasts in a row without a MAC ACK (router changed channel, TES rebooted elsewhere)
+restart the session handshake; if it is not up within 5 s the node hops every 1.2 s (longer than
+the 1 s SHR resend) until it is. Hopping moves the AP too, so a phone on it drops briefly — it
+only happens while pairing or while the TES cannot be found. The TES side did not change.
+
 **Pairing flow** (numeric comparison, like Bluetooth):
 1. Start pairing on both devices — here with the `PAIR` command (UART) or the web page's button; on TES from `/control`.
 2. This PSU broadcasts its X25519 public key; the TES answers with its own; the PSU commits to a nonce before seeing the TES's; both derive the same **6-digit code**.
