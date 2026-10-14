@@ -1,9 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Re-configure automatically when git HEAD changes (new commit or branch switch)
-if(EXISTS ${CMAKE_SOURCE_DIR}/.git/HEAD)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/.git/HEAD)
-endif()
+# Re-configure automatically when git HEAD moves. .git/HEAD alone only changes on a branch
+# switch ("ref: refs/heads/main" stays the same across commits), so the version stayed at
+# whatever the first configure saw — "unknown" on the desktop (2026-10-14). .git/logs/HEAD is
+# appended on every commit, checkout and reset; .git/index catches the -dirty flag.
+foreach(f HEAD logs/HEAD index)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/.git/${f})
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/.git/${f})
+    endif()
+endforeach()
 
 execute_process(
     COMMAND git describe --tags --always --dirty

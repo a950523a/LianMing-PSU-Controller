@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ESP32-based CAN Bus controller for LianMing (LM) high-frequency switching rectifier PSU modules (e.g., LM48-6000AL, LM100-6000AL). Built with ESP-IDF v5.5.5 (not Arduino). Licensed CC BY-NC-SA 4.0 (non-commercial).
 
-Current version: **v1.3.1** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
+Current version: **v1.4.0** (linked to git tag via `CMakeLists.txt` — do not hardcode version strings anywhere in source).
 
 ## Current Status (2026-09-24)
 
