@@ -265,15 +265,20 @@ Both serial commands and UI button increments are clamped to these limits.
 ### Available power (2026-10-17)
 
 The module's output depends on its AC input: **1.3 kW on 110 V, 6 kW on 220 V** (user-supplied
-figures; between 140 V and 180 V it interpolates linearly — all in `config_common.h`). On an
+figures, in `config_common.h`), chosen **by band** — below 150 V is the 110 V band. No
+interpolation: the module itself works in two regions, and a sagging 220 V supply stays in its band. On an
 ordinary outlet the AC side is usually the real limit (Taiwanese outlets are 15 A: 220 V × 15 A
 is ~3 kW, half the module). So:
 
-- `PowerProtocol` reads the AC input itself every 10 s (`AC_QUERY_PERIOD_MS`; the first read 2 s
-  after start). Only a human `GET:AC` / the web button sets `newInputVoltage`, so the periodic read
+- `PowerProtocol` reads the AC input itself every 10 s idle / 2 s while outputting (the first read
+  2 s after start), so the voltage drop under load is seen. Only a human `GET:AC` / the web button sets `newInputVoltage`, so the periodic read
   does not print `AC=` on the UART every 10 s.
-- `power_limit.cpp` (pure, host-tested in the session that wrote it): `pmax = min(module rating at
-  this AC voltage, AC V × outlet limit × 0.93)`; 0 = AC not read yet → no limit (as before).
+- `power_limit.cpp` (pure, host-tested in the session that wrote it): `pmax = min(module rating of
+  the band, min(measured AC V, band nominal 110/220 V) × outlet limit × 0.93)`; 0 = AC not read
+  yet → no limit (as before). The breaker trips on current, and at the same power a sagging voltage
+  means more current — so a low reading is taken as measured, a high one no higher than nominal.
+  0.93 is below the module's real efficiency (~0.95), also the safe direction. Default 15 A kept
+  (decided 2026-10-17), not the 80 % continuous-load figure.
 - **Outlet limit**: NVS `psu_cfg/outlet_da` (0.1 A), default 15 A, 0 = no limit (dedicated
   circuit), else 5–63 A. Set from the web page (插座電流上限), `{"cmd":"SET_OUTLET","a":15}`, or
   `SET:OUTLET=15` on the serial port. Kept here, not on the TES, because it describes this unit's

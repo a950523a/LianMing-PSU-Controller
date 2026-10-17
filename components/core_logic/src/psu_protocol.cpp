@@ -79,8 +79,8 @@ void PowerProtocol::loop() {
             sendSetCommand(_targetVolts, _targetAmps);
     }
 
-    // 5. AC 輸入電壓：自動定期讀，算出可用功率（插到別的插座要重開機，但 AC 會掉電壓，照樣跟著走）
-    if (now - _lastAcQuery >= AC_QUERY_PERIOD_MS) {
+    // 5. AC 輸入電壓：自動定期讀，算出可用功率（輸出中 2 秒一次，帶載壓降也算進去）
+    if (now - _lastAcQuery >= (_status.isOn ? AC_QUERY_PERIOD_ON_MS : AC_QUERY_PERIOD_MS)) {
         _lastAcQuery = now;
         sendQueryInput();
     }

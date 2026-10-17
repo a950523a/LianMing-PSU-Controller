@@ -19,11 +19,12 @@
 #define MAX_TARGET_CURRENT          66.0f
 
 // ── 可用功率（2026-10-17，power_limit.cpp）──────────────────────────────────
-// 模組在不同 AC 輸入下能出的 DC 功率：110 V 1.3 kW、220 V 6 kW（使用者提供）。
-// 中間的電壓直線內插；換型號改這裡
+// 模組在不同 AC 輸入下能出的 DC 功率：110 V 檔 1.3 kW、220 V 檔 6 kW（使用者提供）。
+// 用檔位判斷，不內插：模組本身就分兩區工作，台灣也沒有 160 V 的插座。換型號改這裡
 #define AC_VALID_MIN_V          80.0f    // 低於這個當作還沒讀到
-#define AC_LOW_LINE_V          140.0f    // 以下算低壓輸入
-#define AC_HIGH_LINE_V         180.0f    // 以上算高壓輸入
+#define AC_BAND_SPLIT_V        150.0f    // 以下 110 V 檔、以上 220 V 檔
+#define AC_NOMINAL_LOW_V       110.0f    // 換算插座功率時，電壓最多算到這一檔的標稱值
+#define AC_NOMINAL_HIGH_V      220.0f
 #define MODULE_POWER_LOW_W    1300.0f
 #define MODULE_POWER_HIGH_W   6000.0f
 #define MODULE_EFFICIENCY        0.93f   // AC → DC，用來把插座電流換算成可輸出的功率（偏保守）
@@ -31,7 +32,8 @@
 #define OUTLET_LIMIT_DEFAULT_DA    150
 #define OUTLET_LIMIT_MIN_DA         50
 #define OUTLET_LIMIT_MAX_DA        630
-#define AC_QUERY_PERIOD_MS       10000   // 自動讀 AC 電壓的間隔
+#define AC_QUERY_PERIOD_MS       10000   // 自動讀 AC 電壓的間隔（待機）
+#define AC_QUERY_PERIOD_ON_MS     2000   // 輸出中：帶載壓降出現時上限要跟著降
 // 功率上限換算電流用「量到的輸出電壓」（車子電壓低就能多給電流）：每秒重算，差 0.5 A 以上才重送
 #define POWER_RECHECK_MS          1000
 #define POWER_RESEND_DELTA_A      0.5f
