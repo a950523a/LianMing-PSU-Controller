@@ -142,6 +142,10 @@ static uint32_t   s_auth_rejects    = 0;
 #define LINK_FAIL_LIMIT     5u
 static uint8_t           s_chan           = 1;    // 目前的頻道
 static uint8_t           s_chan_blocked   = 0;    // TES 說它在這個頻道、我們卻切不過去（手機連著熱點）
+// TES 有在送 $CHN（新版）：之後就用「多久沒收到 TES 的驗證訊息」判斷掉線，不只看 MAC ACK
+static bool              s_tes_sends_chn  = false;
+static uint32_t          s_last_tes_rx_ms = 0;
+#define LINK_RX_TIMEOUT_MS  12000u   // TES 每 5 s 送一次 $CHN：12 s 都沒收到就當作掉線
 static uint32_t          s_chan_blocked_log_ms = 0;
 static uint8_t           s_chan_saved     = 0;    // NVS 裡的頻道（0 = 沒存過）
 static uint32_t          s_hop_ms         = 0;
@@ -223,7 +227,13 @@ static void set_channel(uint8_t ch) {
 // 所以「找 TES」與「跟著 TES」在手機連著熱點時都動不了 —— 2026-10-18 就是這樣卡住的。
 static void follow_tes_channel(uint8_t ch) {
     if (s_transport != TRANSPORT_ESPNOW || ch < CH_MIN || ch > CH_MAX) return;
-    if (ch == s_chan) { s_chan_blocked = 0; return; }
+    s_tes_sends_chn = true;
+    if (ch == s_chan) {
+        // TES 確認我們在對的頻道：這時才存 —— 握手成功的頻道可能只是 TES 掃描時路過的
+        s_chan_blocked = 0;
+        if (s_chan != s_chan_saved) nvs_save_channel(s_chan);
+        return;
+    }
     uint8_t from = s_chan;
     set_channel(ch);
     if (s_chan == ch) {
@@ -348,6 +358,7 @@ static void handle_line(const char *line, size_t len, const uint8_t *src) {
                         ? psu_sess_unwrap(&s_sess, line, len, &inner, ms_now())
                         : PSU_SESS_PLAIN;
     if (r == PSU_SESS_OK) {
+        s_last_tes_rx_ms = ms_now();
         if (s_transport == TRANSPORT_ESPNOW) {
             rx_push(line, inner);
             rx_push("\n", 1);
@@ -402,8 +413,17 @@ static void link_channel_poll(uint32_t now) {
             s_link_ok_ms = now;
             return;
         }
+        // 新版 TES 每 5 s 送 $CHN：太久沒收到 TES 的驗證訊息就重新握手、找頻道。
+        // 只看 MAC ACK 不夠：停在隔壁頻道時偶爾會送成功，計數一直被歸零（2026-10-18 卡過）
+        if (s_tes_sends_chn && now - s_last_tes_rx_ms >= LINK_RX_TIMEOUT_MS) {
+            printf("ESP-NOW: nothing from TES for %lu ms - re-handshaking\n", (unsigned long)(now - s_last_tes_rx_ms));
+            sess_restart();
+            s_last_tes_rx_ms = now;
+            s_link_ok_ms = now;
+            return;
+        }
         s_link_ok_ms = now;
-        if (s_chan != s_chan_saved) nvs_save_channel(s_chan);
+        // 不在這裡存頻道：握手成功的頻道可能只是 TES 開機掃描時路過的。等 TES 用 $CHN 確認才存
         return;
     }
     // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找
