@@ -23,5 +23,9 @@ endif()
 message(STATUS "Firmware version: ${GIT_FW_VERSION}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# Must be a build property set before project(): add_compile_definitions() after project() only
+# reached the top-level dummy target, so every component (web_ctrl, serial_cmd) fell back to
+# config_common.h's "unknown" (2026-10-18).
+idf_build_set_property(COMPILE_DEFINITIONS "FIRMWARE_VERSION=\"${GIT_FW_VERSION}\"" APPEND)
+set(PROJECT_VER "${GIT_FW_VERSION}")
 project(LianMing-PSU-Controller)
-add_compile_definitions(FIRMWARE_VERSION="${GIT_FW_VERSION}")
