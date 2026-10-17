@@ -7,6 +7,8 @@
 // 狀態回報週期：輸出中 100 ms，待機 1 s（待機的 $ST 同時是心跳）
 static const uint32_t STATUS_PERIOD_ON_MS  = 100;
 static const uint32_t STATUS_PERIOD_OFF_MS = 1000;
+// $PWR：有變化馬上送；沒變化也每 30 s 送一次（ESP-NOW 偶爾掉一則，TES 不會一直拿著舊的）
+static const uint32_t POWER_PERIOD_MS = 30000;
 
 // 輸出電壓低於這個值視為「沒在輸出」，本筆電壓／電流標為無效。
 // TES 控制板看到無效就改用自己的 ADC —— 沿用舊協定「≥ 1 V 才送 V=，否則送 HB」的界線。
@@ -46,8 +48,9 @@ static int16_t toCentiS(float x)
 
 SerialCmd::SerialCmd(IHardwareHAL* hal, PowerProtocol* psu)
     : _hal(hal), _psu(psu), _bufIndex(0), _discarding(false),
-      _lastStatusTime(0), _statusSeq(0) {
+      _lastStatusTime(0), _statusSeq(0), _lastPowerTime(0) {
     memset(_inputBuffer, 0, BUF_SIZE);
+    memset(&_lastPower, 0, sizeof(_lastPower));
 }
 
 void SerialCmd::begin() {
@@ -87,7 +90,16 @@ void SerialCmd::loop() {
         _lastStatusTime = now;
     }
 
-    // 3. AC 查詢結果（人下的 GET:AC 指令的非同步回應，維持文字格式）
+    // 3. 可用功率：AC 電壓差 2 V 以上、或功率上限、插座上限變了就送
+    {
+        uint16_t vac = (uint16_t)(st.inputVoltage * 10.0f + 0.5f);
+        int dv = (int)vac - (int)_lastPower.vac_dv;
+        bool changed = dv > 20 || dv < -20 || st.powerLimitW != _lastPower.pmax_w ||
+                       st.outletLimitDa != _lastPower.ilim_da || st.acSource != _lastPower.src;
+        if ((changed && st.inputVoltage > 0.0f) || now - _lastPowerTime >= POWER_PERIOD_MS) sendPower(st);
+    }
+
+    // 4. AC 查詢結果（人下的 GET:AC 指令的非同步回應，維持文字格式）
     if (st.newInputVoltage) {
         char buf[32];
         snprintf(buf, sizeof(buf), "AC=%.1f\r\n", st.inputVoltage);
@@ -119,7 +131,8 @@ void SerialCmd::sendCap() {
     m.u.cap.node_type = PSU_NODE_RECTIFIER;
     // 聯明的 CAN 協定沒有回報 CV/CC 狀態，所以不宣告 PSU_CAP_REPORT_MODE ——
     // 用設定值與量測值去猜，猜錯時控制板會據此做出錯誤的判斷。
-    m.u.cap.caps      = PSU_CAP_REPORT_V | PSU_CAP_REPORT_I | PSU_CAP_SET_V | PSU_CAP_SET_I;
+    m.u.cap.caps      = PSU_CAP_REPORT_V | PSU_CAP_REPORT_I | PSU_CAP_SET_V | PSU_CAP_SET_I |
+                        PSU_CAP_REPORT_PWR;
     m.u.cap.v_max_cv  = toCentiU(MAX_TARGET_VOLTAGE);
     m.u.cap.i_max_ca  = toCentiU(MAX_TARGET_CURRENT);
     m.u.cap.fw_ver    = fwVersionCode(FIRMWARE_VERSION);
@@ -143,6 +156,19 @@ void SerialCmd::sendStatus(const PowerStatus& st) {
     sendMsg(m);
 }
 
+void SerialCmd::sendPower(const PowerStatus& st) {
+    psu_msg_t m = {};
+    m.type = PSU_MSG_POWER;
+    float vac = st.inputVoltage;
+    m.u.power.vac_dv  = (vac > 0.0f && vac < 6553.0f) ? (uint16_t)(vac * 10.0f + 0.5f) : 0;
+    m.u.power.pmax_w  = st.powerLimitW;
+    m.u.power.ilim_da = st.outletLimitDa;
+    m.u.power.src     = st.acSource;
+    sendMsg(m);
+    _lastPower     = m.u.power;
+    _lastPowerTime = _hal->getTickCount();
+}
+
 void SerialCmd::applySet(const psu_msg_set_t& set) {
     PowerStatus st = _psu->getStatus();
     float v = set.has_v ? (float)set.v_cv / 100.0f : st.voltageSet;
@@ -152,8 +178,11 @@ void SerialCmd::applySet(const psu_msg_set_t& set) {
     ack.type = PSU_MSG_ACK;
     ack.u.ack.seq = set.seq;
 
-    if ((set.has_v && v > MAX_TARGET_VOLTAGE) || (set.has_i && i > MAX_TARGET_CURRENT)) {
-        ack.u.ack.result = PSU_ACK_RANGE;       // 整筆不套用：不要只套一半
+    // 電流超過模組上限：夾到上限照樣套用（TES 的最大電流設定可能比 66 A 高；整筆拒絕的話
+    // 連電壓都不會變）。電壓超過就整筆不套用 —— 那是設定錯了，不要只套一半
+    if (i > MAX_TARGET_CURRENT) i = MAX_TARGET_CURRENT;
+    if (set.has_v && v > MAX_TARGET_VOLTAGE) {
+        ack.u.ack.result = PSU_ACK_RANGE;
     } else {
         _psu->setOutput(v, i);
         ack.u.ack.result = PSU_ACK_OK;
@@ -166,7 +195,7 @@ void SerialCmd::processFrame(const char* line, int len) {
     if (psu_link_decode(line, (size_t)len, &m) != PSU_LINK_OK) return;   // CRC 錯或看不懂：丟掉
 
     switch (m.type) {
-    case PSU_MSG_HELLO: sendCap();           break;
+    case PSU_MSG_HELLO: sendCap(); sendPower(_psu->getStatus()); break;
     case PSU_MSG_SET:   applySet(m.u.set);   break;
     default:            break;   // CAP / ST / ACK 是我們送出的方向
     }
@@ -203,6 +232,23 @@ void SerialCmd::processCommand(char* cmd) {
         _psu->setOutput(_psu->getStatus().voltageSet, i);
         char buf[32];
         snprintf(buf, sizeof(buf), "CMD_ACK:SET_I:%.1f\r\n", i);
+        _hal->uartSend(buf);
+    } else if (strncmp(cmd, "SET:OUTLET=", 11) == 0) {
+        // 插座電流上限（A），0 = 不限
+        char* end;
+        float a = strtof(cmd + 11, &end);
+        if (end == cmd + 11 || *end || !_psu->setOutletLimit((uint16_t)(a * 10.0f + 0.5f))) {
+            _hal->uartSend("ERR:OUTLET_OUT_OF_RANGE\r\n");
+            return;
+        }
+        char buf[40];
+        snprintf(buf, sizeof(buf), "OUTLET=%.1f\r\n", a);
+        _hal->uartSend(buf);
+    } else if (strcmp(cmd, "GET:PWR") == 0) {
+        PowerStatus st = _psu->getStatus();
+        char buf[64];
+        snprintf(buf, sizeof(buf), "AC=%.1f PMAX=%u OUTLET=%.1f\r\n",
+                 st.inputVoltage, (unsigned)st.powerLimitW, st.outletLimitDa / 10.0f);
         _hal->uartSend(buf);
     } else if (strcmp(cmd, "GET:AC") == 0) {
         _psu->queryInputVoltage();

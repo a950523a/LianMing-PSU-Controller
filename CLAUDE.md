@@ -174,6 +174,8 @@ controller wrong information.
 | `SET:I=50.0` | Set current limit (0 – MAX_TARGET_CURRENT) |
 | `ON` / `OFF` | Power on/off with soft-start |
 | `GET:AC` | Query AC input voltage (replies `AC=xxx.x`) |
+| `SET:OUTLET=15` | Outlet current limit in A (0 = no limit, else 5–63; saved) → `OUTLET=15.0` |
+| `GET:PWR` | `AC=… PMAX=<W> OUTLET=<A>` — the available power (see **Available power**) |
 | `EQ:ON` / `EQ:OFF` | Enable/disable multi-module CAN equalization (broadcast) |
 | `PAIR` | Start ESP-NOW pairing (numeric comparison — confirm the code on both devices) |
 | `SET:TRANSPORT=0` | Switch to UART mode (persisted in NVS) |
@@ -251,9 +253,42 @@ Defined in `hal_interface.h` with no-op defaults so `core_logic/` stays portable
 
 Defined in `config_common.h` — adjust here for different PSU models:
 - `MAX_TARGET_VOLTAGE 120.0f`
-- `MAX_TARGET_CURRENT 100.0f`
+- `MAX_TARGET_CURRENT 66.0f` — the module is rated 60 A, adjustable 6–66 A (10–110 %; the user ran
+  it at 5 A without trouble). Was 100 A until 2026-10-17. It is also what `$CAP` reports as `imax`,
+  which the TES uses as a current ceiling. A `$SET` asking for more is **clamped**, not rejected
+  (rejecting dropped the voltage too); a voltage over the limit still rejects the whole `$SET`.
+  Below 5 A is untested — the BMS asks for less near the end of a charge, and the controller sends
+  what it asks rather than raising it to the module minimum.
 
 Both serial commands and UI button increments are clamped to these limits.
+
+### Available power (2026-10-17)
+
+The module's output depends on its AC input: **1.3 kW on 110 V, 6 kW on 220 V** (user-supplied
+figures; between 140 V and 180 V it interpolates linearly — all in `config_common.h`). On an
+ordinary outlet the AC side is usually the real limit (Taiwanese outlets are 15 A: 220 V × 15 A
+is ~3 kW, half the module). So:
+
+- `PowerProtocol` reads the AC input itself every 10 s (`AC_QUERY_PERIOD_MS`; the first read 2 s
+  after start). Only a human `GET:AC` / the web button sets `newInputVoltage`, so the periodic read
+  does not print `AC=` on the UART every 10 s.
+- `power_limit.cpp` (pure, host-tested in the session that wrote it): `pmax = min(module rating at
+  this AC voltage, AC V × outlet limit × 0.93)`; 0 = AC not read yet → no limit (as before).
+- **Outlet limit**: NVS `psu_cfg/outlet_da` (0.1 A), default 15 A, 0 = no limit (dedicated
+  circuit), else 5–63 A. Set from the web page (插座電流上限), `{"cmd":"SET_OUTLET","a":15}`, or
+  `SET:OUTLET=15` on the serial port. Kept here, not on the TES, because it describes this unit's
+  AC connection.
+- **Every current sent to the module is clamped** to `pmax ÷ output voltage` — whoever asked
+  (TES, web, buttons). The voltage is the **measured** output while outputting (≥ 10 V), else the
+  setpoint: a low-voltage vehicle on a higher-voltage supply gets more current. Rechecked every
+  second; re-sent when it moved by 0.5 A or more. `iset_eff` in `/api/status` is the clamped value;
+  the OLED's bottom line shows it with the kW limit.
+- Reported to the TES with PSU-Link `$PWR,<vac>,<pmax>,<ilim>,<src>` (on change, on `HELO`, every
+  30 s; `PSU_CAP_REPORT_PWR` in `$CAP`). `GET:PWR` prints the same on the serial port.
+- **Planned: J1772 / Type-2.** A pilot reader would tell outlet from AC charging station and give
+  the station's current; `$PWR` already carries `src` = 2 (`PSU_AC_SRC_EVSE`) for that, so only this
+  firmware changes: replace the outlet setting with the pilot current when a station is detected.
+- Several modules in parallel (equalisation) are not counted: `pmax` is one module's.
 
 ## Development Environment
 

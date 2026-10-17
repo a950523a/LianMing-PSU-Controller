@@ -16,8 +16,13 @@ struct PowerStatus {
     bool isSoftStarting;
     bool setCmdSuccess;
     bool powerCmdSuccess;
-    bool newInputVoltage;
+    bool newInputVoltage;       // 人下的 GET:AC／網頁按鈕的結果到了（定期自動讀的不算）
     uint32_t lastUpdate;
+    // 可用功率（power_limit.h）：TES 經 $PWR 拿到同一組數字
+    uint16_t powerLimitW;       // 現在能給的最大 DC 功率；0 = AC 還沒讀到、不限
+    uint16_t outletLimitDa;     // 插座電流上限（0.1 A）；0 = 不限
+    uint8_t  acSource;          // psu_ac_src_t（現在只有插座；之後接 J1772／Type-2 會有 AC 樁）
+    float    currentEff;        // 實際送給模組的電流設定（被功率上限收過的）
 };
 
 class PowerProtocol {
@@ -29,7 +34,9 @@ public:
     void setOutput(float voltageV, float currentA);
     void setPower(bool on);
     void setEqualization(bool enable);
-    void queryInputVoltage();
+    void queryInputVoltage();   // 人下的查詢：結果會設 newInputVoltage
+    // 插座電流上限（0.1 A；0 = 不限，否則 OUTLET_LIMIT_MIN_DA–MAX_DA）。存起來，馬上重算功率上限
+    bool setOutletLimit(uint16_t da);
     void clearInputFlag() { _status.newInputVoltage = false; }
     
     PowerStatus getStatus() const { return _status; }
@@ -41,6 +48,10 @@ private:
     
     bool _startupCheckDone;
     uint32_t _lastQueryTime;
+    uint32_t _lastAcQuery;
+    bool     _userAcQuery;
+    uint32_t _lastPowerCheck;
+    float    _lastSentAmps;
     
     // Soft Start
     bool _softStartActive;
@@ -62,6 +73,9 @@ private:
     void queryStatus();
     void queryCurrentSetpoint();
     void sendSetCommand(float voltage, float current);
+    void sendQueryInput();
+    void recomputeLimit();
+    float limitVolts() const;   // 算功率上限用的電壓：輸出中用量到的，否則用設定值
     void parseFrame(const HalCanFrame& frame);
 };
 

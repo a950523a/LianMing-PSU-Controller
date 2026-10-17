@@ -160,6 +160,8 @@ $<類型>,<欄位>,...*<CRC16>
 | `SET:V=<value>` | 設定目標電壓（`0 ~ 120.0` V），手動測試用 | `CMD_ACK:SET_V:<value>` |
 | `SET:I=<value>` | 設定目標電流（`0 ~ 100.0` A），手動測試用 | `CMD_ACK:SET_I:<value>` |
 | `GET:AC` | 查詢 AC 輸入電壓 | `CMD_ACK:QUERY_AC`，非同步回傳 `AC=xxx.x` |
+| `SET:OUTLET=15` | 插座電流上限（A；0 = 不限，否則 5–63，會存起來） | `OUTLET=15.0` |
+| `GET:PWR` | 目前的可用功率 | `AC=… PMAX=<W> OUTLET=<A>` |
 | `EQ:ON` | 啟用多模組 CAN 均流（廣播） | `CMD_ACK:EQ_ON` |
 | `EQ:OFF` | 停用多模組 CAN 均流（廣播） | `CMD_ACK:EQ_OFF` |
 

@@ -9,9 +9,10 @@
 // Command issued by the web UI; drained by processCommands() in the main loop.
 struct WebCmd {
     enum Type : uint8_t {
-        NONE, ON, OFF, SET_VI, EQ_ON, EQ_OFF, QUERY_AC, PAIR, SET_TRANSPORT, PAIR_YES, PAIR_NO
+        NONE, ON, OFF, SET_VI, EQ_ON, EQ_OFF, QUERY_AC, PAIR, SET_TRANSPORT, PAIR_YES, PAIR_NO, SET_OUTLET
     } type;
     float v, i;
+    uint16_t outlet_da;
     int   transport_mode;
 };
 

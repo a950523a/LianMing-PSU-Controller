@@ -216,7 +216,12 @@ void AppUI::drawScreen() {
     _hal->displayDrawString(0, 40, buf, 1);
 
     if (_mode == MODE_MONITOR) {
-        snprintf(buf, sizeof(buf), "Set: %.0fV %.1fA", _cachedStatus.voltageSet, _cachedStatus.currentSet);
+        // 有功率上限時多一欄 kW：被它收住的電流比設定值小，看得出原因
+        if (_cachedStatus.powerLimitW)
+            snprintf(buf, sizeof(buf), "Set:%.0fV %.1fA %.1fkW", _cachedStatus.voltageSet,
+                     _cachedStatus.currentEff, _cachedStatus.powerLimitW / 1000.0f);
+        else
+            snprintf(buf, sizeof(buf), "Set: %.0fV %.1fA", _cachedStatus.voltageSet, _cachedStatus.currentSet);
     } else if (_mode == MODE_SET_VOLTAGE) {
         snprintf(buf, sizeof(buf), ">> Set Volt: %.1f", _cachedStatus.voltageSet);
     } else if (_mode == MODE_SET_CURRENT) {

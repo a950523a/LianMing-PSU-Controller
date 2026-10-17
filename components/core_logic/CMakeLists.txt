@@ -3,6 +3,7 @@ idf_component_register(
         "src/psu_protocol.cpp"
         "src/app_ui.cpp"
         "src/serial_cmd.cpp"
+        "src/power_limit.cpp"
     
     INCLUDE_DIRS 
         "include"

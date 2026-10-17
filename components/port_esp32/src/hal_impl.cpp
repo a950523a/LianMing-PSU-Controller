@@ -592,6 +592,22 @@ public:
         return s_transport;
     }
 
+    bool settingGetU16(const char* key, uint16_t* out) override {
+        nvs_handle_t h;
+        if (nvs_open("psu_cfg", NVS_READONLY, &h) != ESP_OK) return false;
+        bool ok = nvs_get_u16(h, key, out) == ESP_OK;
+        nvs_close(h);
+        return ok;
+    }
+
+    void settingSetU16(const char* key, uint16_t value) override {
+        nvs_handle_t h;
+        if (nvs_open("psu_cfg", NVS_READWRITE, &h) != ESP_OK) return;
+        nvs_set_u16(h, key, value);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
     bool isPairedEspNow() override {
         return s_tes_mac_valid;
     }

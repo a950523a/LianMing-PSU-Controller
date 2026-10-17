@@ -73,6 +73,10 @@ public:
     virtual void getPairInfo(HalPairInfo& info) { info = HalPairInfo(); }
     // 使用者對配對碼的回應：accept = 兩邊數字相同；配對碼出來前傳 false = 取消
     virtual void pairAnswer(bool accept) { (void)accept; }
+
+    // 存在掉電後還留著的地方（ESP32：NVS）的小設定。沒有就回 false，呼叫端用預設值
+    virtual bool settingGetU16(const char* key, uint16_t* out) { (void)key; (void)out; return false; }
+    virtual void settingSetU16(const char* key, uint16_t value) { (void)key; (void)value; }
 };
 
 #endif // HAL_INTERFACE_H

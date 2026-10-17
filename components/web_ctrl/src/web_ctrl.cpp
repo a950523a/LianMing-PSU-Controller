@@ -77,6 +77,10 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
     <span id="ac" class="val" style="font-size:.9em">-- V</span>
   </div>
   <div class="row">
+    <span class="lbl">可用功率</span>
+    <span id="pmax" class="val" style="font-size:.9em">--</span>
+  </div>
+  <div class="row">
     <span class="lbl">均流模式</span>
     <span id="eq" class="val" style="font-size:.9em">--</span>
   </div>
@@ -90,7 +94,7 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
   <h2>輸出設定</h2>
   <div class="row">
     <div><span class="lbl">電壓 (V)</span><br><input type="number" id="vIn" min="0" max="120" step="0.5" value="0"></div>
-    <div style="text-align:right"><span class="lbl">電流 (A)</span><br><input type="number" id="iIn" min="0" max="100" step="0.5" value="0"></div>
+    <div style="text-align:right"><span class="lbl">電流 (A)</span><br><input type="number" id="iIn" min="0" max="66" step="0.5" value="0"></div>
   </div>
   <div class="btns" style="margin-top:12px">
     <button onclick="setVI()" class="full">套用 V / I 設定</button>
@@ -105,6 +109,18 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
     <button onclick="cmd('EQ_ON')">均流 ON</button>
     <button onclick="cmd('EQ_OFF')">均流 OFF</button>
     <button onclick="cmd('QUERY_AC')" class="full">查詢 AC 電壓</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>插座電流上限</h2>
+  <div class="lbl" style="line-height:1.5;margin-bottom:8px">
+    插在一般插座時，AC 端最多能拿多少電流（台灣一般插座 15 A）。可用功率取「模組在這個 AC 電壓下的額定」與「AC 電壓 × 這個電流」比較小的那個，
+    充電控制器也照它收電流。專用迴路填 0 = 不限。
+  </div>
+  <div class="row">
+    <div><span class="lbl">電流 (A，0 或 5–63)</span><br><input type="number" id="olIn" min="0" max="63" step="1"></div>
+    <div style="text-align:right;align-self:flex-end"><button onclick="setOutlet()">儲存</button></div>
   </div>
 </div>
 
@@ -156,6 +172,11 @@ async function fetchStatus() {
     document.getElementById('i').textContent   = d.i.toFixed(1);
     document.getElementById('sp').textContent  = d.vset.toFixed(1)+' V / '+d.iset.toFixed(1)+' A';
     document.getElementById('ac').textContent  = d.ac > 0 ? d.ac.toFixed(1)+' V' : '-- V';
+    document.getElementById('pmax').textContent = d.pmax > 0
+      ? (d.pmax/1000).toFixed(2)+' kW'+(d.outlet_a > 0 ? '（插座 '+d.outlet_a+' A）' : '（插座不限）')
+      : '--（AC 還沒讀到，不限）';
+    const ol = document.getElementById('olIn');
+    if (document.activeElement !== ol && d.outlet_a !== undefined) ol.value = d.outlet_a;
     document.getElementById('eq').textContent  = d.eq ? 'ON' : 'OFF';
     document.getElementById('ver').textContent = 'Firmware: '+d.version+'  │  IP: 192.168.4.1';
     const st = document.getElementById('st');
@@ -203,6 +224,12 @@ async function setTransport(m) {
   try { await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'SET_TRANSPORT',mode:m})}); } catch(e){}
 }
 
+async function setOutlet() {
+  const a = parseFloat(document.getElementById('olIn').value);
+  if (!(a === 0 || (a >= 5 && a <= 63))) { alert('請填 0（不限）或 5–63 A'); return; }
+  await fetch('/api/cmd', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({cmd:'SET_OUTLET', a})});
+}
 async function setVI() {
   const v = parseFloat(document.getElementById('vIn').value);
   const i = parseFloat(document.getElementById('iIn').value);
@@ -270,6 +297,9 @@ static esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddNumberToObject(root, "vset",      (double)st.voltageSet);
     cJSON_AddNumberToObject(root, "iset",      (double)st.currentSet);
     cJSON_AddNumberToObject(root, "ac",        (double)st.inputVoltage);
+    cJSON_AddNumberToObject(root, "pmax",      st.powerLimitW);              // W，0 = AC 還沒讀到
+    cJSON_AddNumberToObject(root, "outlet_a",  st.outletLimitDa / 10.0);     // 0 = 不限
+    cJSON_AddNumberToObject(root, "iset_eff",  (double)st.currentEff);       // 被功率上限收過的電流設定
     cJSON_AddBoolToObject  (root, "on",        st.isOn);
     cJSON_AddBoolToObject  (root, "softstart", st.isSoftStarting);
     cJSON_AddBoolToObject  (root, "eq",        false);
@@ -334,6 +364,13 @@ static esp_err_t handle_cmd(httpd_req_t* req) {
         else if (strcmp(cs, "PAIR")          == 0) { wc.type = WebCmd::PAIR; }
         else if (strcmp(cs, "PAIR_YES")      == 0) { wc.type = WebCmd::PAIR_YES; }
         else if (strcmp(cs, "PAIR_NO")       == 0) { wc.type = WebCmd::PAIR_NO; }
+        else if (strcmp(cs, "SET_OUTLET")    == 0) {
+            cJSON* ja = cJSON_GetObjectItemCaseSensitive(root, "a");
+            if (cJSON_IsNumber(ja) && ja->valuedouble >= 0 && ja->valuedouble <= 63) {
+                wc.type = WebCmd::SET_OUTLET;
+                wc.outlet_da = (uint16_t)(ja->valuedouble * 10.0 + 0.5);
+            }
+        }
         else if (strcmp(cs, "SET_TRANSPORT") == 0) {
             wc.type = WebCmd::SET_TRANSPORT;
             cJSON* jm = cJSON_GetObjectItemCaseSensitive(root, "mode");
@@ -463,6 +500,7 @@ void WebCtrl::processCommands() {
             case WebCmd::PAIR_YES:      _hal->pairAnswer(true);              break;
             case WebCmd::PAIR_NO:       _hal->pairAnswer(false);             break;
             case WebCmd::SET_TRANSPORT: _hal->setTransport(wc.transport_mode); break;
+            case WebCmd::SET_OUTLET:    _psu->setOutletLimit(wc.outlet_da);  break;
             default: break;
         }
     }
