@@ -207,6 +207,16 @@ restart the session handshake; if it is not up within 5 s the node hops every 1.
 the 1 s SHR resend) until it is. Hopping moves the AP too, so a phone on it drops briefly — it
 only happens while pairing or while the TES cannot be found. The TES side did not change.
 
+**Following the TES's channel (2026-10-18).** The search above was not enough on hardware: parked on
+channel 8 with the TES on 9, adjacent-channel leakage let the handshake succeed, so the node stayed, worked
+intermittently (-80 dBm at the TES, its ST never arriving) and **saved 8 as `tes_ch`** — the unanswered-send
+counter kept being reset by the occasional send that got through, so it never re-searched, and reboots or
+older firmware on either side changed nothing. Now the TES sends PSU-Link `$CHN,<ch>` (authenticated) every
+5 s once linked; `followTesChannel()` moves there and saves it. **A phone connected to this unit's hotspot
+blocks every channel change** (ESP-IDF: in STA+AP mode `esp_wifi_set_channel()` must not be called while the
+AP has stations) — that blocks the search as well as `$CHN`. The web page shows the channel and, when a
+switch is blocked, says to take the phone off the hotspot (`ch`, `ch_blocked` in `/api/status`).
+
 **Pairing flow** (numeric comparison, like Bluetooth):
 1. Start pairing on both devices — here with the `PAIR` command (UART) or the web page's button; on TES from `/control`.
 2. This PSU broadcasts its X25519 public key; the TES answers with its own; the PSU commits to a nonce before seeing the TES's; both derive the same **6-digit code**.

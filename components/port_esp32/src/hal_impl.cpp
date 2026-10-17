@@ -141,6 +141,8 @@ static uint32_t   s_auth_rejects    = 0;
 #define LINK_SCAN_AFTER_MS  5000u
 #define LINK_FAIL_LIMIT     5u
 static uint8_t           s_chan           = 1;    // 目前的頻道
+static uint8_t           s_chan_blocked   = 0;    // TES 說它在這個頻道、我們卻切不過去（手機連著熱點）
+static uint32_t          s_chan_blocked_log_ms = 0;
 static uint8_t           s_chan_saved     = 0;    // NVS 裡的頻道（0 = 沒存過）
 static uint32_t          s_hop_ms         = 0;
 static uint32_t          s_link_ok_ms     = 0;    // 最後一次確認連線正常
@@ -215,6 +217,28 @@ static bool sess_restart() {
 
 static void set_channel(uint8_t ch) {
     if (esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE) == ESP_OK) s_chan = ch;
+}
+
+// 熱點上有手機連著時 esp_wifi_set_channel() 會失敗（ESP-IDF：STA+AP 模式下 AP 有連線就不能呼叫），
+// 所以「找 TES」與「跟著 TES」在手機連著熱點時都動不了 —— 2026-10-18 就是這樣卡住的。
+static void follow_tes_channel(uint8_t ch) {
+    if (s_transport != TRANSPORT_ESPNOW || ch < CH_MIN || ch > CH_MAX) return;
+    if (ch == s_chan) { s_chan_blocked = 0; return; }
+    uint8_t from = s_chan;
+    set_channel(ch);
+    if (s_chan == ch) {
+        s_chan_blocked = 0;
+        printf("ESP-NOW: TES says it is on channel %u - moved from %u\n", (unsigned)ch, (unsigned)from);
+        nvs_save_channel(ch);
+        return;
+    }
+    s_chan_blocked = ch;
+    uint32_t now = ms_now();
+    if (now - s_chan_blocked_log_ms >= 60000u || s_chan_blocked_log_ms == 0) {
+        s_chan_blocked_log_ms = now;
+        printf("ESP-NOW: TES is on channel %u but we cannot leave %u - a phone on the hotspot blocks it\n",
+               (unsigned)ch, (unsigned)s_chan);
+    }
 }
 
 static void hop_channel() {
@@ -591,6 +615,10 @@ public:
     int getTransport() override {
         return s_transport;
     }
+
+    void followTesChannel(uint8_t ch) override { follow_tes_channel(ch); }
+    uint8_t getLinkChannel() override { return s_chan; }
+    uint8_t getBlockedChannel() override { return s_chan_blocked; }
 
     bool settingGetU16(const char* key, uint16_t* out) override {
         nvs_handle_t h;

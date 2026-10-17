@@ -74,6 +74,12 @@ public:
     // 使用者對配對碼的回應：accept = 兩邊數字相同；配對碼出來前傳 false = 取消
     virtual void pairAnswer(bool accept) { (void)accept; }
 
+    // TES 用 $CHN 告訴我們它的 WiFi 頻道（ESP-NOW 用，2026-10-18）：不在那個頻道就切過去
+    virtual void followTesChannel(uint8_t ch) { (void)ch; }
+    // 目前頻道；TES 要我們去、但切不過去的頻道（手機連著熱點時切不了），0 = 沒有
+    virtual uint8_t getLinkChannel() { return 0; }
+    virtual uint8_t getBlockedChannel() { return 0; }
+
     // 存在掉電後還留著的地方（ESP32：NVS）的小設定。沒有就回 false，呼叫端用預設值
     virtual bool settingGetU16(const char* key, uint16_t* out) { (void)key; (void)out; return false; }
     virtual void settingSetU16(const char* key, uint16_t value) { (void)key; (void)value; }

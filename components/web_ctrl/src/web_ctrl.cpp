@@ -138,6 +138,11 @@ input[type=file]{font-size:.8em;color:#8b949e;margin-top:8px;width:100%}
     <span class="lbl">TES MAC</span>
     <span id="peer-mac" class="val" style="font-size:.75em">--</span>
   </div>
+  <div class="row">
+    <span class="lbl">頻道</span>
+    <span id="chan" class="val" style="font-size:.9em">--</span>
+  </div>
+  <div id="chan-warn" style="display:none;font-size:.78em;color:#fa5;margin:6px 0;line-height:1.5"></div>
   <div id="pair-box" style="display:none;text-align:center;margin:8px 0">
     <div style="font-size:.8em;color:#aab">TES 上顯示的數字一樣嗎？</div>
     <div id="pair-code" style="font:700 2em ui-monospace,monospace;letter-spacing:.12em;margin:4px 0"></div>
@@ -205,6 +210,12 @@ async function fetchStatus() {
     }
 
     document.getElementById('peer-mac').textContent = d.peer_mac || '--';
+    document.getElementById('chan').textContent = d.ch ? d.ch : '--';
+    const cw = document.getElementById('chan-warn');
+    if (d.ch_blocked) {
+      cw.textContent = 'TES 在頻道 ' + d.ch_blocked + '，但手機連著這台的熱點時無法切換頻道 —— 看完請讓手機離開這個熱點，就會自動切過去。';
+      cw.style.display = 'block';
+    } else cw.style.display = 'none';
   } catch(e) {}
 }
 
@@ -311,6 +322,8 @@ static esp_err_t handle_status(httpd_req_t* req) {
     cJSON_AddBoolToObject  (root, "paired",    self->_hal->isPairedEspNow());
     cJSON_AddBoolToObject  (root, "pairing",   self->_hal->isPairingActive());
     cJSON_AddStringToObject(root, "peer_mac",  peer_mac[0] ? peer_mac : "--");
+    cJSON_AddNumberToObject(root, "ch",         self->_hal->getLinkChannel());
+    cJSON_AddNumberToObject(root, "ch_blocked", self->_hal->getBlockedChannel());
     {
         HalPairInfo pi;
         self->_hal->getPairInfo(pi);
