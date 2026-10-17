@@ -137,8 +137,9 @@ static uint32_t   s_auth_rejects    = 0;
 #define CH_MIN              1
 #define CH_MAX              13
 #define PAIR_HOP_MS         600u    // > PSU_PAIR_RESEND_MS（500）：每個頻道至少廣播一次
-#define LINK_HOP_MS         1200u   // > PSU_SESS_RESEND_MS（1000）：每個頻道至少送一次 SHR
-#define LINK_SCAN_AFTER_MS  5000u
+#define LINK_HOP_MS         1200u   // 慢掃：> PSU_SESS_RESEND_MS（1000），舊版 TES 每秒才送一次 SH1
+#define LINK_HOP_FAST_MS     250u   // 快掃（2026-10-18）：一跳過去就喊 SHR，新版 TES 立刻回 SH1，往返不到 50 ms
+#define LINK_SCAN_AFTER_MS  1500u   // 握手沒成功多久開始找（原本 5 s）
 #define LINK_FAIL_LIMIT     5u
 static uint8_t           s_chan           = 1;    // 目前的頻道
 static uint8_t           s_chan_blocked   = 0;    // TES 說它在這個頻道、我們卻切不過去（手機連著熱點）
@@ -149,6 +150,7 @@ static uint32_t          s_last_tes_rx_ms = 0;
 static uint32_t          s_chan_blocked_log_ms = 0;
 static uint8_t           s_chan_saved     = 0;    // NVS 裡的頻道（0 = 沒存過）
 static uint32_t          s_hop_ms         = 0;
+static uint8_t           s_link_hops      = 0;    // 這一輪找頻道跳了幾次：快掃、慢掃一輪輪交替
 static uint32_t          s_link_ok_ms     = 0;    // 最後一次確認連線正常
 static volatile uint32_t s_tx_fail_streak = 0;    // 連續沒有 ACK 的單播（send 回呼更新）
 
@@ -423,13 +425,20 @@ static void link_channel_poll(uint32_t now) {
             return;
         }
         s_link_ok_ms = now;
+        s_link_hops  = 0;
         // 不在這裡存頻道：握手成功的頻道可能只是 TES 開機掃描時路過的。等 TES 用 $CHN 確認才存
         return;
     }
-    // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找
-    if (now - s_link_ok_ms >= LINK_SCAN_AFTER_MS && now - s_hop_ms >= LINK_HOP_MS) {
+    // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找。
+    // 快掃一輪（每頻道 250 ms，跳過去就喊 SHR）找不到，下一輪改慢掃 —— 舊版 TES 不會馬上回 SH1。
+    // 握手做到一半（收到 SH1、等 SH3）不跳
+    if (psu_sess_handshaking(&s_sess)) return;
+    bool fast = (s_link_hops / CH_MAX) % 2 == 0;
+    if (now - s_link_ok_ms >= LINK_SCAN_AFTER_MS && now - s_hop_ms >= (fast ? LINK_HOP_FAST_MS : LINK_HOP_MS)) {
         s_hop_ms = now;
+        s_link_hops++;
         hop_channel();
+        psu_sess_kick(&s_sess, now);   // 一到新頻道就喊一聲
     }
 }
 
