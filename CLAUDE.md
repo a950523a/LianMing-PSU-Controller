@@ -326,7 +326,16 @@ Two supported setups:
 
 To change a setting: `idf.py menuconfig`, then `idf.py save-defconfig` to see the non-default list, and merge it into `sdkconfig.defaults` by hand (that command overwrites the file and drops its comments). Existing local `sdkconfig` values win over `sdkconfig.defaults` — delete the local `sdkconfig` after editing the defaults to regenerate it.
 
-**OTA headroom is tight:** the app is 0xE26F0 bytes against a 0xF0000 slot — about 6 % free on 2026-09-30 (0xDFC00, 7 %, before ESP-NOW pairing added +11 KB; most of mbedTLS was already linked for WPA). When it runs out, the fix is a bigger slot (needs a board with more than 2 MB flash; see the partition note above) or `-Os` instead of the default `-Og`, not dropping features.
+**Size trimmed 2026-10-20: 0xE4160 -> 0xBEE00, 20 % of the slot free (was 5 %).** `sdkconfig.defaults`
+turns off what this unit never uses — WPA3 / SAE / OWE, WPA2-Enterprise, IPv6, the CA certificate bundle and
+TLS itself (it is an AP-only web page plus ESP-NOW and never opens a TLS connection) — and builds with
+`-Os` instead of `-Og`. The crypto it needs stays (X25519 and HMAC for the ESP-NOW link, WPA2 for the
+AP). Checked that a fresh sdkconfig from the defaults alone gives the same size. **Not hardware-tested:**
+phone joins the AP (WPA2), web page and web OTA, ESP-NOW pairing and link. If TLS is ever needed (e.g. an
+HTTPS OTA pull), turn `MBEDTLS_TLS_*` back on — the bundle adds ~60 KB. Backtraces under `-Os` are less
+exact than under `-Og`.
+
+Older note: **OTA headroom is tight:** the app is 0xE26F0 bytes against a 0xF0000 slot — about 6 % free on 2026-09-30 (0xDFC00, 7 %, before ESP-NOW pairing added +11 KB; most of mbedTLS was already linked for WPA). When it runs out, the fix is a bigger slot (needs a board with more than 2 MB flash; see the partition note above) or `-Os` instead of the default `-Og`, not dropping features.
 
 ## Design Conventions
 
