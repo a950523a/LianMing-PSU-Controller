@@ -212,7 +212,10 @@ On every hop it sends SHR at once (`psu_sess_kick`), and a current TES answers w
 (PSU-Link: an SHR during an active handshake resends SH1 without waiting for the 1 s resend), so 250 ms
 per channel is enough — a full sweep of 13 channels is ~3 s. An older TES only resends SH1 once a second,
 so fast and slow (1.2 s) sweeps alternate. It never hops in the middle of a handshake
-(`psu_sess_handshaking`). The channel is saved only when the TES confirms it with `$CHN`, and once the TES
+(`psu_sess_handshaking`) — **for at most 500 ms after the last SH1** (PSU-Link `PSU_SESS_HS_HOLD_MS`,
+2026-10-20). Without that limit an SH1 with no SH3 after it kept the node on that channel for good: the TES
+moving from its hotspot channel to the router's, or a single SH1 leaking in from the next channel, left it
+waiting there until a reboot. The channel is saved only when the TES confirms it with `$CHN`, and once the TES
 is known to send `$CHN`, 12 s without an authenticated frame from it restarts the search.
 
 **Following the TES's channel (2026-10-18).** The search above was not enough on hardware: parked on

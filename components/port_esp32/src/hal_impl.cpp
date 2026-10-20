@@ -432,7 +432,7 @@ static void link_channel_poll(uint32_t now) {
     // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找。
     // 快掃一輪（每頻道 250 ms，跳過去就喊 SHR）找不到，下一輪改慢掃 —— 舊版 TES 不會馬上回 SH1。
     // 握手做到一半（收到 SH1、等 SH3）不跳
-    if (psu_sess_handshaking(&s_sess)) return;
+    if (psu_sess_handshaking(&s_sess, now)) return;
     bool fast = (s_link_hops / CH_MAX) % 2 == 0;
     if (now - s_link_ok_ms >= LINK_SCAN_AFTER_MS && now - s_hop_ms >= (fast ? LINK_HOP_FAST_MS : LINK_HOP_MS)) {
         s_hop_ms = now;
