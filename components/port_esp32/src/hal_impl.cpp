@@ -143,9 +143,9 @@ static uint32_t   s_auth_rejects    = 0;
 #define LINK_FAIL_LIMIT     5u
 static uint8_t           s_chan           = 1;    // 目前的頻道
 static uint8_t           s_chan_blocked   = 0;    // TES 說它在這個頻道、我們卻切不過去（手機連著熱點）
-// TES 有在送 $CHN（新版）：之後就用「多久沒收到 TES 的驗證訊息」判斷掉線，不只看 MAC ACK
-static bool              s_tes_sends_chn  = false;
+// 握手完成後用「多久沒收到 TES 的驗證訊息」判斷掉線，不只看 MAC ACK（TES 每 5 s 送 $CHN）
 static uint32_t          s_last_tes_rx_ms = 0;
+static bool              s_was_ready      = false;   // 上一圈已經握手完成（抓「剛完成」那一刻）
 #define LINK_RX_TIMEOUT_MS  12000u   // TES 每 5 s 送一次 $CHN：12 s 都沒收到就當作掉線
 static uint32_t          s_chan_blocked_log_ms = 0;
 static uint8_t           s_chan_saved     = 0;    // NVS 裡的頻道（0 = 沒存過）
@@ -229,7 +229,6 @@ static void set_channel(uint8_t ch) {
 // 所以「找 TES」與「跟著 TES」在手機連著熱點時都動不了 —— 2026-10-18 就是這樣卡住的。
 static void follow_tes_channel(uint8_t ch) {
     if (s_transport != TRANSPORT_ESPNOW || ch < CH_MIN || ch > CH_MAX) return;
-    s_tes_sends_chn = true;
     if (ch == s_chan) {
         // TES 確認我們在對的頻道：這時才存 —— 握手成功的頻道可能只是 TES 掃描時路過的
         s_chan_blocked = 0;
@@ -415,9 +414,16 @@ static void link_channel_poll(uint32_t now) {
             s_link_ok_ms = now;
             return;
         }
-        // 新版 TES 每 5 s 送 $CHN：太久沒收到 TES 的驗證訊息就重新握手、找頻道。
-        // 只看 MAC ACK 不夠：停在隔壁頻道時偶爾會送成功，計數一直被歸零（2026-10-18 卡過）
-        if (s_tes_sends_chn && now - s_last_tes_rx_ms >= LINK_RX_TIMEOUT_MS) {
+        // TES 每 5 s 送 $CHN：太久沒收到 TES 的驗證訊息就重新握手、找頻道。
+        // 只看 MAC ACK 不夠：停在隔壁頻道時偶爾會送成功，計數一直被歸零（2026-10-18 卡過）。
+        // 以前要先收到過一則 $CHN 才啟用這個檢查（相容不送 $CHN 的舊版 TES）—— 但開機後第一次握手
+        // 就停在隔壁頻道的話，$CHN 一則都收不到，檢查永遠不啟用，只能重開 LianMing（2026-10-22 拿掉）。
+        // 計時從握手完成那一刻起算
+        if (!s_was_ready) {
+            s_was_ready      = true;
+            s_last_tes_rx_ms = now;
+        }
+        if (now - s_last_tes_rx_ms >= LINK_RX_TIMEOUT_MS) {
             printf("ESP-NOW: nothing from TES for %lu ms - re-handshaking\n", (unsigned long)(now - s_last_tes_rx_ms));
             sess_restart();
             s_last_tes_rx_ms = now;
@@ -429,6 +435,7 @@ static void link_channel_poll(uint32_t now) {
         // 不在這裡存頻道：握手成功的頻道可能只是 TES 開機掃描時路過的。等 TES 用 $CHN 確認才存
         return;
     }
+    s_was_ready = false;
     // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找。
     // 快掃一輪（每頻道 250 ms，跳過去就喊 SHR）找不到，下一輪改慢掃 —— 舊版 TES 不會馬上回 SH1。
     // 握手做到一半（收到 SH1、等 SH3）不跳

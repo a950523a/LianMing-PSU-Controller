@@ -215,8 +215,10 @@ so fast and slow (1.2 s) sweeps alternate. It never hops in the middle of a hand
 (`psu_sess_handshaking`) — **for at most 500 ms after the last SH1** (PSU-Link `PSU_SESS_HS_HOLD_MS`,
 2026-10-20). Without that limit an SH1 with no SH3 after it kept the node on that channel for good: the TES
 moving from its hotspot channel to the router's, or a single SH1 leaking in from the next channel, left it
-waiting there until a reboot. The channel is saved only when the TES confirms it with `$CHN`, and once the TES
-is known to send `$CHN`, 12 s without an authenticated frame from it restarts the search.
+waiting there until a reboot. The channel is saved only when the TES confirms it with `$CHN`, and 12 s without an authenticated
+frame from the TES after the handshake restarts the search. Until 2026-10-22 that check waited for a first
+`$CHN` (old TES firmware sends none) — so a node whose very first handshake after boot landed on the
+neighbouring channel never got one, never enabled the check, and stayed there until rebooted.
 
 **Following the TES's channel (2026-10-18).** The search above was not enough on hardware: parked on
 channel 8 with the TES on 9, adjacent-channel leakage let the handshake succeed, so the node stayed, worked
