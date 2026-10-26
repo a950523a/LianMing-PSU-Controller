@@ -19,6 +19,7 @@
 #include <esp_mac.h>
 #include <esp_now.h>
 #include <freertos/queue.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <u8g2.h>
@@ -141,6 +142,20 @@ static uint32_t   s_auth_rejects    = 0;
 #define LINK_HOP_FAST_MS     250u   // 快掃（2026-10-18）：一跳過去就喊 SHR，新版 TES 立刻回 SH1，往返不到 50 ms
 #define LINK_SCAN_AFTER_MS  1500u   // 握手沒成功多久開始找（原本 5 s）
 #define LINK_FAIL_LIMIT     5u
+// 用 TES 的網路找頻道（$NET，2026-10-26）：記得 TES 在哪個網路的話，找 TES 時先掃描一次 WiFi，
+// 看那台基地台在哪個頻道就直接切過去（約 2 s），不必一個頻道一個頻道試。掃不到（TES 換了網路、
+// 不在範圍內）才照舊跳頻道找。常見的 ESP-NOW＋WiFi 教學也是這樣找頻道的
+#define LINK_RESCAN_MS     30000u   // 兩次掃描最少間隔（中間照舊跳頻道）
+#define LINK_SCAN_HOLD_MS   3000u   // 掃到之後在那個頻道等握手多久，才回去跳頻道
+#define LINK_SCAN_MAX_MS    6000u   // 掃描最久等多久（正常約 2 s）
+static psu_msg_network_t s_net;                   // TES 上次說的網路
+static bool              s_net_valid      = false;
+static volatile bool     s_scan_done      = false; // WIFI_EVENT_SCAN_DONE（事件任務設、主任務讀）
+static bool              s_scan_running   = false;
+static uint32_t          s_scan_start_ms  = 0;
+static uint32_t          s_scan_last_ms   = 0;
+static bool              s_scan_ever      = false;
+static uint32_t          s_scan_hold_until = 0;
 static uint8_t           s_chan           = 1;    // 目前的頻道
 static uint8_t           s_chan_blocked   = 0;    // TES 說它在這個頻道、我們卻切不過去（手機連著熱點）
 // 握手完成後用「多久沒收到 TES 的驗證訊息」判斷掉線，不只看 MAC ACK（TES 每 5 s 送 $CHN）
@@ -184,6 +199,9 @@ static void nvs_load_config() {
         s_chan_saved = ch;
         s_chan       = ch;
     }
+    size_t nlen = sizeof s_net;
+    s_net_valid = nvs_get_blob(h, "tes_net", &s_net, &nlen) == ESP_OK && nlen == sizeof s_net &&
+                  s_net.ssid_len >= 1 && s_net.ssid_len <= PSU_SSID_MAX;
     nvs_close(h);
 
     if (have_mac && have_ltk) {
@@ -219,6 +237,51 @@ static bool sess_restart() {
     if (ok) psu_sess_init(&s_sess, PSU_ROLE_NODE, ltk, psu_crypto_mbedtls(), ms_now());
     memset(ltk, 0, sizeof ltk);
     return ok;
+}
+
+// TES 說它在哪個網路：變了才寫 NVS
+static void remember_tes_network(const uint8_t* bssid, const uint8_t* ssid, uint8_t len) {
+    if (s_transport != TRANSPORT_ESPNOW || len < 1 || len > PSU_SSID_MAX) return;
+    psu_msg_network_t n = {};
+    memcpy(n.bssid, bssid, 6);
+    memcpy(n.ssid, ssid, len);
+    n.ssid_len = len;
+    if (s_net_valid && memcmp(&n, &s_net, sizeof n) == 0) return;
+    s_net       = n;
+    s_net_valid = true;
+    nvs_handle_t h;
+    if (nvs_open("psu_cfg", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_blob(h, "tes_net", &s_net, sizeof s_net);
+    nvs_commit(h);
+    nvs_close(h);
+    printf("ESP-NOW: TES is on network %.*s (" MACSTR ") - saved\n", (int)len, (const char*)ssid, MAC2STR(bssid));
+}
+
+static void on_scan_done(void*, esp_event_base_t, int32_t, void*) { s_scan_done = true; }
+
+// 掃描結果裡 TES 的網路在哪個頻道：先比 BSSID（mesh 同名的基地台可能在不同頻道），再比 SSID（取最強）。
+// 找不到回 0。讀完就清掉掃描結果
+static uint8_t scan_find_tes_channel() {
+    uint16_t n = 0;
+    esp_wifi_scan_get_ap_num(&n);
+    if (n == 0) { esp_wifi_clear_ap_list(); return 0; }
+    wifi_ap_record_t* recs = (wifi_ap_record_t*)calloc(n, sizeof(wifi_ap_record_t));
+    if (!recs) { esp_wifi_clear_ap_list(); return 0; }
+    esp_wifi_scan_get_ap_records(&n, recs);
+    uint8_t by_bssid = 0, by_ssid = 0;
+    int8_t  best = -127;
+    for (uint16_t i = 0; i < n; i++) {
+        const wifi_ap_record_t& r = recs[i];
+        if (memcmp(r.bssid, s_net.bssid, 6) == 0) { by_bssid = r.primary; break; }
+        if (strnlen((const char*)r.ssid, sizeof r.ssid) == s_net.ssid_len &&
+            memcmp(r.ssid, s_net.ssid, s_net.ssid_len) == 0 && r.rssi > best) {
+            best = r.rssi;
+            by_ssid = r.primary;
+        }
+    }
+    free(recs);
+    uint8_t ch = by_bssid ? by_bssid : by_ssid;
+    return (ch >= CH_MIN && ch <= CH_MAX) ? ch : 0;
 }
 
 static void set_channel(uint8_t ch) {
@@ -436,6 +499,52 @@ static void link_channel_poll(uint32_t now) {
         return;
     }
     s_was_ready = false;
+    // 先用 TES 的網路找頻道：掃描中就等結果；掃到了就切過去、在那裡等一下握手
+    if (s_scan_running) {
+        if (!s_scan_done) {
+            if (now - s_scan_start_ms >= LINK_SCAN_MAX_MS) {
+                esp_wifi_scan_stop();
+                s_scan_running = false;
+                printf("ESP-NOW: WiFi scan timed out\n");
+            }
+            return;
+        }
+        s_scan_done    = false;
+        s_scan_running = false;
+        uint8_t ch = scan_find_tes_channel();
+        if (ch) {
+            uint8_t from = s_chan;
+            set_channel(ch);
+            printf("ESP-NOW: TES's network %.*s is on channel %u (from %u)%s\n", (int)s_net.ssid_len,
+                   (const char*)s_net.ssid, (unsigned)ch, (unsigned)from,
+                   s_chan == ch ? "" : " - cannot move, a phone on the hotspot blocks it");
+            s_scan_hold_until = now + LINK_SCAN_HOLD_MS;
+            s_hop_ms = now;
+            psu_sess_kick(&s_sess, now);   // 到了就喊一聲
+        } else {
+            printf("ESP-NOW: TES's network %.*s not found - searching channel by channel\n",
+                   (int)s_net.ssid_len, (const char*)s_net.ssid);
+        }
+        return;
+    }
+    if ((int32_t)(s_scan_hold_until - now) > 0) {
+        if (psu_sess_handshaking(&s_sess, now)) return;
+        if (now - s_hop_ms >= LINK_HOP_MS) { s_hop_ms = now; psu_sess_kick(&s_sess, now); }
+        return;
+    }
+    if (s_net_valid && now - s_link_ok_ms >= LINK_SCAN_AFTER_MS && !psu_sess_handshaking(&s_sess, now) &&
+        (!s_scan_ever || now - s_scan_last_ms >= LINK_RESCAN_MS)) {
+        wifi_scan_config_t sc = {};
+        sc.show_hidden = true;   // 隱藏 SSID 的路由器：信標裡沒名字，但 BSSID 對得上
+        if (esp_wifi_scan_start(&sc, false) == ESP_OK) {
+            s_scan_done     = false;
+            s_scan_running  = true;
+            s_scan_start_ms = now;
+            s_scan_last_ms  = now;
+            s_scan_ever     = true;
+            return;
+        }
+    }
     // 握手還沒成功：先給目前頻道 LINK_SCAN_AFTER_MS，之後開始找。
     // 快掃一輪（每頻道 250 ms，跳過去就喊 SHR）找不到，下一輪改慢掃 —— 舊版 TES 不會馬上回 SH1。
     // 握手做到一半（收到 SH1、等 SH3）不跳
@@ -653,6 +762,9 @@ public:
     }
 
     void followTesChannel(uint8_t ch) override { follow_tes_channel(ch); }
+    void rememberTesNetwork(const uint8_t* bssid, const uint8_t* ssid, uint8_t len) override {
+        remember_tes_network(bssid, ssid, len);
+    }
     uint8_t getLinkChannel() override { return s_chan; }
     uint8_t getBlockedChannel() override { return s_chan_blocked; }
 
@@ -768,6 +880,7 @@ private:
 
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+        ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, on_scan_done, nullptr));
         ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
 

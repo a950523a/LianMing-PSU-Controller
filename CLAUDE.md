@@ -230,6 +230,16 @@ blocks every channel change** (ESP-IDF: in STA+AP mode `esp_wifi_set_channel()` 
 AP has stations) — that blocks the search as well as `$CHN`. The web page shows the channel and, when a
 switch is blocked, says to take the phone off the hotspot (`ch`, `ch_blocked` in `/api/status`).
 
+**Finding the TES by its network (2026-10-26).** Hopping guesses; the common ESP-NOW + WiFi tutorials scan
+instead. The TES now sends PSU-Link `$NET,<bssid>,<ssid>` (its router's access point, or its own hotspot)
+once linked, on change and every 30 s; `rememberTesNetwork()` keeps it in NVS (`psu_cfg/tes_net`). When the
+link is down for 1.5 s the node runs one WiFi scan (~2 s, `show_hidden` so a hidden router still matches by
+BSSID), takes that access point's channel — **BSSID first** (a mesh network's access points share one SSID on
+different channels), else the strongest matching SSID — moves there, shouts SHR and waits 3 s for the
+handshake. Not found, or still not linked → channel-by-channel hopping as before; the scan repeats at most
+every 30 s. No `$NET` yet (first boot after pairing, older TES) → hopping only. The scan cannot move the
+channel while a phone is on this unit's hotspot either.
+
 **Pairing flow** (numeric comparison, like Bluetooth):
 1. Start pairing on both devices — here with the `PAIR` command (UART) or the web page's button; on TES from `/control`.
 2. This PSU broadcasts its X25519 public key; the TES answers with its own; the PSU commits to a nonce before seeing the TES's; both derive the same **6-digit code**.

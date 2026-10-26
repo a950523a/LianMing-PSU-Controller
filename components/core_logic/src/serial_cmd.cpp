@@ -198,6 +198,9 @@ void SerialCmd::processFrame(const char* line, int len) {
     case PSU_MSG_HELLO: sendCap(); sendPower(_psu->getStatus()); break;
     case PSU_MSG_SET:   applySet(m.u.set);   break;
     case PSU_MSG_CHANNEL: _hal->followTesChannel(m.u.channel.channel); break;
+    case PSU_MSG_NETWORK:
+        _hal->rememberTesNetwork(m.u.network.bssid, m.u.network.ssid, m.u.network.ssid_len);
+        break;
     default:            break;   // CAP / ST / ACK 是我們送出的方向
     }
 }

@@ -76,6 +76,10 @@ public:
 
     // TES 用 $CHN 告訴我們它的 WiFi 頻道（ESP-NOW 用，2026-10-18）：不在那個頻道就切過去
     virtual void followTesChannel(uint8_t ch) { (void)ch; }
+    // TES 用 $NET 告訴我們它在哪個網路（BSSID＋SSID，2026-10-26）：記下來，下次找 TES 時先掃描這個網路的頻道
+    virtual void rememberTesNetwork(const uint8_t* bssid, const uint8_t* ssid, uint8_t ssid_len) {
+        (void)bssid; (void)ssid; (void)ssid_len;
+    }
     // 目前頻道；TES 要我們去、但切不過去的頻道（手機連著熱點時切不了），0 = 沒有
     virtual uint8_t getLinkChannel() { return 0; }
     virtual uint8_t getBlockedChannel() { return 0; }
