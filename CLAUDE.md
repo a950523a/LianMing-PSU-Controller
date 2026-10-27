@@ -85,6 +85,20 @@ There is no test suite — validation is hardware-in-the-loop via serial monitor
 3. Subsequent OTA: connect to WiFi `PSU-Controller` (pw: `psu12345`), open `http://192.168.4.1`, upload `build/LianMing-PSU-Controller.bin` via the OTA section.
 4. Device reboots and runs new firmware. The previous slot is kept as rollback (future).
 
+### Planned: update through the TES controller (2026-10-27, not implemented)
+
+The TES will download this firmware and send it over PSU-Link (ESP-NOW, or UART — same messages; see
+PSU-Link's README "Planned: updating a node's firmware"). The node writes it to the next OTA slot with the
+same `esp_ota_*` calls as `handle_ota`, checks SHA-256 and the `esp_app_desc_t` project name (the web upload
+does not check the name yet — add it there too), then switches.
+- **The output must stay on the whole time** — the TES may be running from this supply, and an off output
+  (or a module that drops it) shuts the TES down mid-update. Never send OFF for an update.
+- Reboot already keeps the output: at boot `PowerProtocol::parseFrame` sees the module running
+  (`hwIsOff` false) and adopts it — `isOn`, target = present voltage, queries the current setpoint — instead
+  of switching it. **To test on hardware:** that the module holds its output through ~1–2 s of CAN silence
+  during the reboot, and through flash-erase stalls (~45 ms per 4 KB sector; keep the TWAI ISR in IRAM).
+- Image ~790 KB: ESP-NOW roughly 10–30 s, UART ~80 s at 115200 (~10 s at 921600).
+
 `partitions.csv` defines the dual-OTA layout (two × 960KB slots, fits 2MB flash). If hardware has 4MB flash, enlarge `ota_0`/`ota_1` to `0x1E0000` each for more headroom.
 
 ## Versioning
