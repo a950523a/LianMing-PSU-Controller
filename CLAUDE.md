@@ -85,6 +85,16 @@ There is no test suite — validation is hardware-in-the-loop via serial monitor
 3. Subsequent OTA: connect to WiFi `PSU-Controller` (pw: `psu12345`), open `http://192.168.4.1`, upload `build/LianMing-PSU-Controller.bin` via the OTA section.
 4. Device reboots and runs new firmware. The previous slot is kept as rollback (future).
 
+### Planned: output switched by the TES (2026-10-27, not implemented)
+
+For a TES with its **own 12 V supply** only (see PSU-Link's README "Planned: the controller switches the
+node's output"). Then the TES keeps this rectifier off while idle, and per session: set V (battery voltage)
+and a low I → ON → wait for the voltage → TES closes its relay; at the end relay open → OFF. Needs: a
+capability bit and `OUT` handling; an NVS flag "switched mode" that **suppresses the auto-ON at boot**
+(the rule below stays the default — without the flag nothing changes); and a **dead-man**: if the TES link
+goes quiet within a few seconds of an `OUT,0`, switch back ON, clear the flag and report it — the TES was
+running from us after all.
+
 ### Planned: update through the TES controller (2026-10-27, not implemented)
 
 The TES will download this firmware and send it over PSU-Link (ESP-NOW, or UART — same messages; see
