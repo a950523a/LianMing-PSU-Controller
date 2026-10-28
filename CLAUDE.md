@@ -108,6 +108,11 @@ does not check the name yet — add it there too), then switches.
   of switching it. **To test on hardware:** that the module holds its output through ~1–2 s of CAN silence
   during the reboot, and through flash-erase stalls (~45 ms per 4 KB sector; keep the TWAI ISR in IRAM).
 - Image ~790 KB: ESP-NOW roughly 10–30 s, UART ~80 s at 115200 (~10 s at 921600).
+- Added 2026-10-28: the user can always **upload** this image to the TES by hand and the TES relays it (fetching
+  the GitHub release is an extra path). The node also has to send PSU-Link's new `INF` after `CAP`: hardware
+  revision (fixed at build until a board revision needs a board-ID strap), the full version string from
+  `esp_app_desc_t`, an empty bootloader field, and the MAC. Check the update image's header (node type,
+  hardware range) in `FWB` as well as the project name.
 
 `partitions.csv` defines the dual-OTA layout (two × 960KB slots, fits 2MB flash). If hardware has 4MB flash, enlarge `ota_0`/`ota_1` to `0x1E0000` each for more headroom.
 
