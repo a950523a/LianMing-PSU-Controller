@@ -7,6 +7,10 @@
 
 #define PSU_ADDRESS     1
 
+// 硬體版本（PSU-Link $INF 的 <hw>，2026-10-28）：目前只有一種板子。之後改板、燒錄檔不能互通時
+// 才加一號，到時候再決定要不要用分壓電阻讓同一份韌體自己認板子
+#define NODE_HW_REV     1
+
 #define TRANSPORT_UART    0
 #define TRANSPORT_ESPNOW  1
 #define SOFT_START_INITIAL_CURRENT 10.0f

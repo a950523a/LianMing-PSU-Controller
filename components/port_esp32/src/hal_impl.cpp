@@ -762,6 +762,13 @@ public:
     }
 
     void followTesChannel(uint8_t ch) override { follow_tes_channel(ch); }
+    size_t getUniqueId(uint8_t* out, size_t max) override {
+        uint8_t mac[6];
+        if (max < 6 || esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;
+        memcpy(out, mac, 6);
+        return 6;
+    }
+
     void rememberTesNetwork(const uint8_t* bssid, const uint8_t* ssid, uint8_t len) override {
         remember_tes_network(bssid, ssid, len);
     }

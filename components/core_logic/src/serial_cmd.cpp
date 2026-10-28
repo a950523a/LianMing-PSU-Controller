@@ -137,6 +137,25 @@ void SerialCmd::sendCap() {
     m.u.cap.i_max_ca  = toCentiU(MAX_TARGET_CURRENT);
     m.u.cap.fw_ver    = fwVersionCode(FIRMWARE_VERSION);
     sendMsg(m);
+    sendInfo();
+}
+
+// 節點身分：緊接在 CAP 之後（開機與回 HELO 時）。版本字串只留 PSU-Link 允許的字元、截到上限
+void SerialCmd::sendInfo() {
+    psu_msg_t m = {};
+    m.type = PSU_MSG_INFO;
+    m.u.info.hw_rev = NODE_HW_REV;
+    size_t n = 0;
+    for (const char* p = FIRMWARE_VERSION; *p && n < PSU_VER_STR_MAX; p++) {
+        char c = *p;
+        bool ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  c == '.' || c == '_' || c == '+' || c == '-';
+        if (ok) m.u.info.fw[n++] = c;
+    }
+    m.u.info.fw[n]   = '\0';
+    m.u.info.boot[0] = '\0';                    // ESP-IDF 的開機程式不另外更新，不回報
+    m.u.info.uid_len = (uint8_t)_hal->getUniqueId(m.u.info.uid, PSU_UID_MAX);
+    if (m.u.info.uid_len > 0) sendMsg(m);
 }
 
 void SerialCmd::sendStatus(const PowerStatus& st) {

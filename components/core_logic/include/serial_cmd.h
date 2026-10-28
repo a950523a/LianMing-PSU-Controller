@@ -35,6 +35,7 @@ private:
 
     void sendMsg(const psu_msg_t& msg);
     void sendCap();
+    void sendInfo();
     void sendStatus(const PowerStatus& st);
     void sendPower(const PowerStatus& st);
     void applySet(const psu_msg_set_t& set);
