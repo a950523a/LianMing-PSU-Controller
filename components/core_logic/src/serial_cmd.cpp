@@ -46,11 +46,19 @@ static int16_t toCentiS(float x)
     return (int16_t)(x * 100.0f + (x >= 0.0f ? 0.5f : -0.5f));
 }
 
+// psu_fw 的回呼 → HAL（寫 flash 是平台的事）
+static uint8_t fw_begin(void* c, const psu_msg_fw_begin_t* b) { return ((IHardwareHAL*)c)->fwBegin(*b); }
+static uint8_t fw_write(void* c, uint32_t off, const uint8_t* d, uint8_t n) { return ((IHardwareHAL*)c)->fwWrite(off, d, n); }
+static uint8_t fw_finish(void* c) { return ((IHardwareHAL*)c)->fwFinish(); }
+static void    fw_abort(void* c) { ((IHardwareHAL*)c)->fwAbort(); }
+
 SerialCmd::SerialCmd(IHardwareHAL* hal, PowerProtocol* psu)
     : _hal(hal), _psu(psu), _bufIndex(0), _discarding(false),
-      _lastStatusTime(0), _statusSeq(0), _lastPowerTime(0) {
+      _lastStatusTime(0), _statusSeq(0), _lastPowerTime(0), _restartAt(0) {
     memset(_inputBuffer, 0, BUF_SIZE);
     memset(&_lastPower, 0, sizeof(_lastPower));
+    _fwOps = { fw_begin, fw_write, fw_finish, fw_abort, hal };
+    psu_fw_rx_init(&_fw, &_fwOps);
 }
 
 void SerialCmd::begin() {
@@ -79,6 +87,13 @@ void SerialCmd::loop() {
             _bufIndex   = 0;
             _discarding = true;
         }
+    }
+
+    // 韌體更新：太久沒收到就放棄；成功的話回應送出後重開機
+    {
+        uint32_t t = _hal->getTickCount();
+        psu_fw_rx_tick(&_fw, t);
+        if (_restartAt && (int32_t)(t - _restartAt) >= 0) { _restartAt = 0; _hal->restart(); }
     }
 
     // 2. Telemetry：$ST 輸出中 100 ms 一次、待機 1 s 一次
@@ -133,6 +148,7 @@ void SerialCmd::sendCap() {
     // 用設定值與量測值去猜，猜錯時控制板會據此做出錯誤的判斷。
     m.u.cap.caps      = PSU_CAP_REPORT_V | PSU_CAP_REPORT_I | PSU_CAP_SET_V | PSU_CAP_SET_I |
                         PSU_CAP_REPORT_PWR;
+    if (_hal->fwSupported()) m.u.cap.caps |= PSU_CAP_FW_UPDATE;
     m.u.cap.v_max_cv  = toCentiU(MAX_TARGET_VOLTAGE);
     m.u.cap.i_max_ca  = toCentiU(MAX_TARGET_CURRENT);
     m.u.cap.fw_ver    = fwVersionCode(FIRMWARE_VERSION);
@@ -220,6 +236,17 @@ void SerialCmd::processFrame(const char* line, int len) {
     case PSU_MSG_NETWORK:
         _hal->rememberTesNetwork(m.u.network.bssid, m.u.network.ssid, m.u.network.ssid_len);
         break;
+    case PSU_MSG_FW_BEGIN: case PSU_MSG_FW_DATA: case PSU_MSG_FW_END: case PSU_MSG_FW_ABORT: {
+        // TES 轉傳的韌體更新：輸出照常（不碰 _psu）。驗證、切換成功就在回應送出後 0.5 s 重開機，
+        // 開起來會接回正在輸出的模組（PowerProtocol 開機時看到模組在跑就沿用）
+        psu_msg_t reply;
+        uint32_t now = _hal->getTickCount();
+        if (psu_fw_rx_handle(&_fw, &m, now, &reply)) {
+            sendMsg(reply);
+            if (m.type == PSU_MSG_FW_END && reply.u.fw_ack.result == PSU_FW_OK) _restartAt = (now + 500u) | 1u;
+        }
+        break;
+    }
     default:            break;   // CAP / ST / ACK 是我們送出的方向
     }
 }

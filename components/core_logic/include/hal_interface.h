@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "psu_link/psu_link.h"
 
 // 定義 CAN 訊息結構
 struct HalCanFrame {
@@ -76,6 +77,15 @@ public:
 
     // TES 用 $CHN 告訴我們它的 WiFi 頻道（ESP-NOW 用，2026-10-18）：不在那個頻道就切過去
     virtual void followTesChannel(uint8_t ch) { (void)ch; }
+    // 由 TES 轉傳的韌體更新（PSU-Link FWB／FWD／FWE，2026-10-28）。回傳 psu_fw_result_t。
+    // **輸出不關**：TES 可能正吃這台的電。寫入是依序的；fwFinish 成功後由 SerialCmd 送出回應再 restart()
+    virtual bool    fwSupported() { return false; }
+    virtual uint8_t fwBegin(const psu_msg_fw_begin_t& b) { (void)b; return PSU_FW_REFUSED; }
+    virtual uint8_t fwWrite(uint32_t offset, const uint8_t* data, uint8_t len) { (void)offset; (void)data; (void)len; return PSU_FW_FLASH; }
+    virtual uint8_t fwFinish() { return PSU_FW_FLASH; }
+    virtual void    fwAbort() {}
+    virtual void    restart() {}
+
     // 本機識別碼（$INF 的 <uid>，2026-10-28）：寫進 out、回傳位元組數；0 = 沒有（就不送 INF）
     virtual size_t getUniqueId(uint8_t* out, size_t max) { (void)out; (void)max; return 0; }
 

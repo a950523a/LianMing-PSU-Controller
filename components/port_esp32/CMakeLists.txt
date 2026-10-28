@@ -19,6 +19,8 @@ idf_component_register(
         esp_wifi
         esp_netif
         esp_event
+        app_update
+        mbedtls
         
     # REQUIRES: 公開依賴
     # 因為 port_esp32 的 include 檔可能會引用 core_logic 的型別

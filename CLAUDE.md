@@ -95,7 +95,18 @@ capability bit and `OUT` handling; an NVS flag "switched mode" that **suppresses
 goes quiet within a few seconds of an `OUT,0`, switch back ON, clear the flag and report it — the TES was
 running from us after all.
 
-### Planned: update through the TES controller (2026-10-27, not implemented)
+### Update through the TES controller (planned 2026-10-27; node side implemented 2026-10-28, not tested on hardware)
+
+**Implemented:** `SerialCmd` runs PSU-Link's `psu_fw_rx` (`FWB`/`FWD`/`FWE`/`FWX`) and declares
+`PSU_CAP_FW_UPDATE`; the ESP32 HAL (`fwBegin/fwWrite/fwFinish/fwAbort`) writes the next OTA slot with
+`OTA_WITH_SEQUENTIAL_WRITES` (one sector erase at a time, never the whole slot up front), checks the image name
+twice (the name in `FWB`, then the app descriptor inside the first 288 bytes), hashes as it writes, and at `FWE`
+compares the SHA-256, runs `esp_ota_end` (image validation) and sets the boot slot. `SerialCmd` sends the `FWA`
+and restarts 0.5 s later. The output is never touched. A transfer that hears nothing for 30 s is dropped.
+`CONFIG_TWAI_ISR_IN_IRAM=y` so CAN reception keeps going through the sector erases.
+**Still open:** the web upload (`handle_ota`) does not check the project name yet.
+
+Original plan:
 
 The TES will download this firmware and send it over PSU-Link (ESP-NOW, or UART — same messages; see
 PSU-Link's README "Planned: updating a node's firmware"). The node writes it to the next OTA slot with the

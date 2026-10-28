@@ -26,6 +26,35 @@
 #include "psu_link/psu_pair.h"
 #include "psu_link/psu_sess.h"
 #include "psu_link/psu_crypto_mbedtls.h"
+#include <esp_ota_ops.h>
+#include <esp_app_format.h>
+#include <esp_app_desc.h>
+#include <esp_system.h>
+#include <mbedtls/sha256.h>
+
+// ── TES 轉傳的韌體更新（PSU-Link FWB／FWD／FWE，2026-10-28）──────────────────────
+// 寫進下一個 OTA 分區（依序寫入，一次抹一個扇區 —— 不會先整個分區抹掉卡住好幾秒，
+// CAN 輪詢跟輸出照常）。名稱檢查兩次：FWB 的名稱，以及映像本身前 288 B 裡的 app 描述。
+// 全部收完比 SHA-256、esp_ota_end 驗證映像，才設定下次開機。輸出從頭到尾不關
+static esp_ota_handle_t       s_fw_h;
+static const esp_partition_t* s_fw_part;
+static bool                   s_fw_on;
+static uint32_t               s_fw_written;
+static uint8_t                s_fw_sha[32];
+static mbedtls_sha256_context s_fw_ctx;
+static uint8_t                s_fw_head[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) +
+                                        sizeof(esp_app_desc_t)];
+
+static void fw_drop() {
+    if (s_fw_on) esp_ota_abort(s_fw_h);
+    if (s_fw_on) mbedtls_sha256_free(&s_fw_ctx);
+    s_fw_on = false;
+}
+
+static bool fw_name_ok(const char* name) {
+    const esp_app_desc_t* me = esp_app_get_description();
+    return strncmp(name, me->project_name, sizeof me->project_name) == 0;
+}
 
 // ──────────────────────────────────────────────────────────────
 // I2C / U8g2 globals (unchanged)
@@ -762,6 +791,81 @@ public:
     }
 
     void followTesChannel(uint8_t ch) override { follow_tes_channel(ch); }
+    bool fwSupported() override { return true; }
+
+    uint8_t fwBegin(const psu_msg_fw_begin_t& b) override {
+        fw_drop();
+        if (!fw_name_ok(b.name)) {
+            printf("FW update refused: image \"%s\" is not this node's firmware\n", b.name);
+            return PSU_FW_REFUSED;
+        }
+        s_fw_part = esp_ota_get_next_update_partition(NULL);
+        if (!s_fw_part || b.size > s_fw_part->size) {
+            printf("FW update refused: %lu bytes do not fit\n", (unsigned long)b.size);
+            return PSU_FW_REFUSED;
+        }
+        if (esp_ota_begin(s_fw_part, OTA_WITH_SEQUENTIAL_WRITES, &s_fw_h) != ESP_OK) return PSU_FW_FLASH;
+        mbedtls_sha256_init(&s_fw_ctx);
+        mbedtls_sha256_starts(&s_fw_ctx, 0);
+        memcpy(s_fw_sha, b.sha256, 32);
+        s_fw_written = 0;
+        s_fw_on = true;
+        printf("FW update from TES: %s %s, %lu bytes -> %s (output stays on)\n", b.name, b.ver,
+               (unsigned long)b.size, s_fw_part->label);
+        return PSU_FW_OK;
+    }
+
+    uint8_t fwWrite(uint32_t offset, const uint8_t* data, uint8_t len) override {
+        if (!s_fw_on || offset != s_fw_written) return PSU_FW_FLASH;
+        // 映像開頭的 app 描述：名稱再對一次（FWB 的名稱是 TES 讀出來的，這裡看映像本身）
+        if (offset < sizeof s_fw_head) {
+            size_t n = sizeof s_fw_head - offset;
+            memcpy(s_fw_head + offset, data, n < len ? n : len);
+            if (offset + len >= sizeof s_fw_head) {
+                const esp_app_desc_t* d = (const esp_app_desc_t*)(s_fw_head + sizeof(esp_image_header_t) +
+                                                                  sizeof(esp_image_segment_header_t));
+                char name[sizeof d->project_name + 1];
+                memcpy(name, d->project_name, sizeof d->project_name);
+                name[sizeof d->project_name] = '\0';
+                if (d->magic_word != ESP_APP_DESC_MAGIC_WORD || !fw_name_ok(name)) {
+                    printf("FW update: the image itself is not this node's firmware\n");
+                    fw_drop();
+                    return PSU_FW_FLASH;
+                }
+            }
+        }
+        if (esp_ota_write(s_fw_h, data, len) != ESP_OK) { fw_drop(); return PSU_FW_FLASH; }
+        mbedtls_sha256_update(&s_fw_ctx, data, len);
+        s_fw_written += len;
+        return PSU_FW_OK;
+    }
+
+    uint8_t fwFinish() override {
+        if (!s_fw_on) return PSU_FW_FLASH;
+        uint8_t sum[32];
+        mbedtls_sha256_finish(&s_fw_ctx, sum);
+        mbedtls_sha256_free(&s_fw_ctx);
+        if (memcmp(sum, s_fw_sha, 32) != 0) {
+            esp_ota_abort(s_fw_h);
+            s_fw_on = false;
+            printf("FW update: SHA-256 mismatch\n");
+            return PSU_FW_HASH;
+        }
+        s_fw_on = false;
+        esp_err_t e = esp_ota_end(s_fw_h);            // 驗證映像（格式、晶片、checksum）
+        if (e != ESP_OK) { printf("FW update: image invalid (%s)\n", esp_err_to_name(e)); return PSU_FW_HASH; }
+        if (esp_ota_set_boot_partition(s_fw_part) != ESP_OK) return PSU_FW_FLASH;
+        printf("FW update: verified, restarting into %s\n", s_fw_part->label);
+        return PSU_FW_OK;
+    }
+
+    void fwAbort() override {
+        if (s_fw_on) printf("FW update aborted after %lu bytes\n", (unsigned long)s_fw_written);
+        fw_drop();
+    }
+
+    void restart() override { esp_restart(); }
+
     size_t getUniqueId(uint8_t* out, size_t max) override {
         uint8_t mac[6];
         if (max < 6 || esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return 0;

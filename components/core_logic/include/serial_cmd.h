@@ -4,6 +4,7 @@
 #include "hal_interface.h"
 #include "psu_protocol.h"
 #include "psu_link/psu_link.h"
+#include "psu_link/psu_fw.h"
 
 // 指令埠（UART2 或 ESP-NOW，由 HAL 決定）上的兩種內容：
 //   - '$' 開頭：與 TES 控制板之間的連線協定（PSU-Link 子模組，psu_link/psu_link.h）
@@ -28,6 +29,9 @@ private:
     uint16_t _statusSeq;
     uint32_t _lastPowerTime;   // 最後一次送出 $PWR
     psu_msg_power_t _lastPower;
+    psu_fw_rx_t     _fw;           // TES 轉傳的韌體更新（PSU-Link psu_fw.h）
+    psu_fw_rx_ops_t _fwOps;
+    uint32_t        _restartAt;    // 更新成功、回應送出後重開機的時間；0 = 不重開
 
     void processLine(char* line, int len);
     void processFrame(const char* line, int len);

@@ -43,3 +43,7 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # CONFIG_MBEDTLS_CERTIFICATE_BUNDLE is not set
 CONFIG_MBEDTLS_TLS_DISABLED=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# TWAI ISR in IRAM (2026-10-28): firmware updates relayed by the TES write flash while the module keeps
+# running; with the ISR in flash, CAN reception stops for every sector erase (~45 ms).
+CONFIG_TWAI_ISR_IN_IRAM=y
